@@ -13,20 +13,18 @@
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useMemo } = React;
+    const { useState, useMemo, useEffect } = React;
     const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
     const GCATS = ["Renta/Bodega","Sueldos Admin","Luz/Agua/Internet","Mantenimiento","Papelería","Depreciación","Seguros","Honorarios Externos","Publicidad","Empaques/Embalaje","Fletes de Entrega","Otros"];
     const CURRENCIES = ["USD","CUP","EUR"];
+    const GIST_FILENAME = "almacen-mayorista-data.json";
     let _uid = 200;
     const uid = () => String(++_uid);
     const num = (v) => isNaN(parseFloat(v)) ? 0 : parseFloat(v);
 
     function App() {
       const [tab, setTab] = useState("resultados");
-      const [cfg, setCfg] = useState({
-        nombre:"Mi Almacén Mayorista", mes:"Junio", anio:2025, comDef:5, invIni:0,
-        CUP_of:24, CUP_inf:250, EUR_usd:1.08
-      });
+      const [cfg, setCfg] = useState({ nombre:"Mi Almacén Mayorista", mes:"Junio", anio:2025, comDef:5, invIni:0, CUP_of:24, CUP_inf:250, EUR_usd:1.08 });
       const [prods, setProds] = useState([]);
       const [compras, setCompras] = useState([]);
       const [ventas, setVentas] = useState([]);
@@ -40,6 +38,158 @@
       const [fg, setFg] = useState({ cat:GCATS[0], conc:"", monto:"", cur:"USD" });
       const [fo, setFo] = useState({ tipo:"ingreso", conc:"", monto:"", cur:"USD" });
 
+      // ── GitHub Sync ──
+      const [ghToken, setGhToken] = useState(() => localStorage.getItem('gh_token') || '');
+      const [gistId, setGistId] = useState(() => localStorage.getItem('gist_id') || '');
+      const [tokenInput, setTokenInput] = useState('');
+      const [allMonths, setAllMonths] = useState({});
+      const [syncStatus, setSyncStatus] = useState(ghToken ? 'idle' : 'notoken');
+      const [syncMsg, setSyncMsg] = useState('');
+
+      useEffect(() => {
+        if (ghToken && gistId) loadAllMonths(ghToken, gistId);
+      }, []);
+
+      const loadAllMonths = async (token, id) => {
+        try {
+          const res = await fetch(`https://api.github.com/gists/${id}`, {
+            headers: { 'Authorization': `token ${token}` }
+          });
+          if (!res.ok) throw new Error('no se pudo cargar');
+          const gist = await res.json();
+          const content = gist.files[GIST_FILENAME]?.content;
+          if (content) {
+            const data = JSON.parse(content);
+            setAllMonths(data.months || {});
+          }
+          setSyncStatus('ok');
+          setSyncMsg('Conectado ✓');
+        } catch(e) {
+          setSyncStatus('error');
+          setSyncMsg('Error al cargar datos');
+        }
+      };
+
+      const connectGitHub = async () => {
+        const token = tokenInput.trim();
+        if (!token) return;
+        setSyncStatus('connecting');
+        setSyncMsg('Conectando...');
+        try {
+          const res = await fetch('https://api.github.com/gists?per_page=100', {
+            headers: { 'Authorization': `token ${token}` }
+          });
+          if (!res.ok) throw new Error('Token inválido — verifica que copiaste bien el token');
+          const gists = await res.json();
+          const found = gists.find(g => g.files && g.files[GIST_FILENAME]);
+          let id, months = {};
+          if (found) {
+            id = found.id;
+            const fullRes = await fetch(`https://api.github.com/gists/${id}`, {
+              headers: { 'Authorization': `token ${token}` }
+            });
+            const full = await fullRes.json();
+            const parsed = JSON.parse(full.files[GIST_FILENAME].content);
+            months = parsed.months || {};
+            setSyncMsg('¡Datos anteriores encontrados! ' + Object.keys(months).length + ' mes(es) cargados.');
+          } else {
+            const createRes = await fetch('https://api.github.com/gists', {
+              method: 'POST',
+              headers: { 'Authorization': `token ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                description: 'Datos Almacén Mayorista — App Estado de Resultados',
+                public: false,
+                files: { [GIST_FILENAME]: { content: JSON.stringify({ months: {} }) } }
+              })
+            });
+            const created = await createRes.json();
+            id = created.id;
+            setSyncMsg('Almacenamiento creado. ¡Listo para guardar meses!');
+          }
+          localStorage.setItem('gh_token', token);
+          localStorage.setItem('gist_id', id);
+          setGhToken(token);
+          setGistId(id);
+          setAllMonths(months);
+          setSyncStatus('ok');
+          setTokenInput('');
+        } catch(e) {
+          setSyncStatus('error');
+          setSyncMsg(e.message);
+        }
+      };
+
+      const saveMonth = async () => {
+        if (!ghToken || !gistId) { alert('Primero conecta con GitHub en la pestaña Config'); return; }
+        setSyncStatus('saving');
+        setSyncMsg('Guardando...');
+        const key = cfg.mes + '-' + cfg.anio;
+        const monthData = {
+          savedAt: new Date().toISOString(),
+          label: key,
+          cfg, prods, compras, ventas, gastos, otros, imp
+        };
+        const newMonths = { ...allMonths, [key]: monthData };
+        try {
+          const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `token ${ghToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              files: { [GIST_FILENAME]: { content: JSON.stringify({ months: newMonths }) } }
+            })
+          });
+          if (!res.ok) throw new Error('Error al guardar');
+          setAllMonths(newMonths);
+          setSyncStatus('ok');
+          setSyncMsg('Guardado ✓  ' + key);
+        } catch(e) {
+          setSyncStatus('error');
+          setSyncMsg('Error al guardar: ' + e.message);
+        }
+      };
+
+      const loadMonth = (key) => {
+        const m = allMonths[key];
+        if (!m) return;
+        if (!confirm('¿Cargar ' + key + '? Se reemplazarán los datos actuales en pantalla.')) return;
+        setCfg(m.cfg);
+        setProds(m.prods || []);
+        setCompras(m.compras || []);
+        setVentas(m.ventas || []);
+        setGastos(m.gastos || []);
+        setOtros(m.otros || []);
+        setImp(m.imp || { isr:"", curIsr:"USD", ptu:"", curPtu:"USD", ex:"", curEx:"USD" });
+        setTab('resultados');
+        setSyncMsg(key + ' cargado ✓');
+      };
+
+      const deleteMonth = async (key) => {
+        if (!confirm('¿Eliminar el mes ' + key + '? Esta acción no se puede deshacer.')) return;
+        const newMonths = { ...allMonths };
+        delete newMonths[key];
+        try {
+          await fetch(`https://api.github.com/gists/${gistId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `token ${ghToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              files: { [GIST_FILENAME]: { content: JSON.stringify({ months: newMonths }) } }
+            })
+          });
+          setAllMonths(newMonths);
+          setSyncMsg(key + ' eliminado');
+        } catch(e) { setSyncMsg('Error al eliminar'); }
+      };
+
+      const newMonth = () => {
+        if (!confirm('¿Comenzar un mes nuevo? Los datos actuales en pantalla se limpiarán (los meses guardados permanecen).')) return;
+        setProds([]); setCompras([]); setVentas([]); setGastos([]); setOtros([]);
+        setImp({ isr:"", curIsr:"USD", ptu:"", curPtu:"USD", ex:"", curEx:"USD" });
+        const now = new Date();
+        setCfg(c => ({ ...c, mes: MESES[now.getMonth()], anio: now.getFullYear() }));
+        setTab('config');
+      };
+
+      // ── Conversions ──
       const toUSD = (amount, cur) => {
         const a = num(amount);
         if (cur==='USD') return a;
@@ -76,7 +226,7 @@
         const totGasOp = comis+gOp;
         const oIng = otros.filter(o=>o.tipo==="ingreso").reduce((s,o)=>s+toUSD(o.monto,o.cur),0);
         const oGas = otros.filter(o=>o.tipo==="gasto").reduce((s,o)=>s+toUSD(o.monto,o.cur),0);
-        const totImp = toUSD(imp.isr,imp.curIsr)+toUSD(imp.ptu,imp.curPtu)+toUSD(imp.ex,imp.curEx);
+        const totImp = toUSD(imp.isr,imp.curIsr||'USD')+toUSD(imp.ptu,imp.curPtu||'USD')+toUSD(imp.ex,imp.curEx||'USD');
         const uBruta=vBruta-cVentas, uOper=uBruta-totGasOp, uAnte=uOper+oIng-oGas, uNeta=uAnte-totImp;
         return { vBruta,cVentas,uBruta,comis,gOp,totGasOp,oIng,oGas,totImp,uOper,uAnte,uNeta,totComp,invFin,
           mbr:vBruta>0?uBruta/vBruta:0, mnr:vBruta>0?uNeta/vBruta:0 };
@@ -93,6 +243,7 @@
           usd_inf: num(cfg.CUP_inf)>0 ? totalONAT/num(cfg.CUP_inf) : 0 };
       }, [st, cfg, ventas]);
 
+      // ── Handlers ──
       const addProd=()=>{if(!fp.nom)return;setProds(p=>[...p,{id:uid(),nom:fp.nom,uni:fp.uni}]);setFp({nom:"",uni:"pza"});};
       const delProd=(id)=>setProds(p=>p.filter(x=>x.id!==id));
       const addComp=()=>{if(!fc.pid||!fc.qty||!fc.punit)return;setCompras(c=>[...c,{...fc,id:uid()}]);setFc({fecha:"",prov:"",pid:"",qty:"",punit:"",cur:"USD"});};
@@ -106,6 +257,7 @@
       const addOtro=()=>{if(!fo.conc||!fo.monto)return;setOtros(o=>[...o,{...fo,id:uid()}]);setFo({tipo:"ingreso",conc:"",monto:"",cur:"USD"});};
       const delOtro=(id)=>setOtros(o=>o.filter(x=>x.id!==id));
 
+      // ── Format ──
       const fmtC=(a,cur)=>{const v=num(a);const abs=Math.abs(v).toLocaleString("es-MX",{minimumFractionDigits:2,maximumFractionDigits:2});const s=v<0?"-":"";if(cur==='USD')return s+'$'+abs;if(cur==='EUR')return s+'€'+abs;return s+abs+' CUP';};
       const fmtEq=(a,cur)=>{const m=fmtC(a,cur);if(cur==='USD')return m;return m+' (≈'+fmtC(toUSD(a,cur),'USD')+')';};
       const fmtM=(v)=>{const n2=num(v);const abs=Math.abs(n2).toLocaleString("es-MX",{minimumFractionDigits:2,maximumFractionDigits:2});return (n2<0?"-":"")+"$"+abs;};
@@ -114,104 +266,68 @@
       const pUni=(id)=>{const p=prods.find(p=>p.id===id);return p?p.uni:"";};
 
       const exportXL=()=>{
-        const wb=XLSX.utils.book_new();
-        const pct2=v=>`${(num(v)*100).toFixed(1)}%`;
-        const er=[
-          ["ESTADO DE RESULTADOS (USD - Tasa Informal)","",""],
-          [cfg.nombre,"",""],["Período: "+cfg.mes+" "+cfg.anio,"",""],
-          ["CUP oficial: 1 USD = "+cfg.CUP_of+" CUP | CUP informal: 1 USD = "+cfg.CUP_inf+" CUP | EUR: 1 EUR = "+cfg.EUR_usd+" USD","",""],
+        const wb=XLSX.utils.book_new();const pct2=v=>`${(num(v)*100).toFixed(1)}%`;
+        const er=[["ESTADO DE RESULTADOS (USD - Tasa Informal)","",""],
+          [cfg.nombre,"",""],[cfg.mes+" "+cfg.anio,"",""],
+          ["CUP oficial: 1 USD = "+cfg.CUP_of+" | CUP informal: 1 USD = "+cfg.CUP_inf+" | EUR: 1 EUR = "+cfg.EUR_usd+" USD","",""],
           ["","",""],["CONCEPTO","MONTO USD","% VENTAS"],
           ["Ventas Brutas",st.vBruta,"100.0%"],["","",""],
           ["COSTO DE VENTAS","",""],["  Inventario Inicial",num(cfg.invIni),""],
-          ["  (+) Compras Netas",st.totComp,""],["  (-) Inventario Final",st.invFin,""],
+          ["  (+) Compras",st.totComp,""],["  (-) Inventario Final",st.invFin,""],
           ["  = Costo de Ventas",st.cVentas,st.vBruta>0?pct2(st.cVentas/st.vBruta):""],["","",""],
           ["UTILIDAD BRUTA",st.uBruta,st.vBruta>0?pct2(st.mbr):""],["","",""],
           ["GASTOS OPERATIVOS","",""],
-          ["  Comisiones sobre Ventas",st.comis,st.vBruta>0?pct2(st.comis/st.vBruta):""],
+          ["  Comisiones",st.comis,st.vBruta>0?pct2(st.comis/st.vBruta):""],
           ...gastos.map(g=>["  "+g.cat+" - "+g.conc+" ("+g.cur+")",toUSD(g.monto,g.cur),""]),
           ["  = Total Gastos",st.totGasOp,st.vBruta>0?pct2(st.totGasOp/st.vBruta):""],["","",""],
           ["UTILIDAD DE OPERACIÓN",st.uOper,st.vBruta>0?pct2(st.uOper/st.vBruta):""],["","",""],
-          ["OTROS INGRESOS Y GASTOS","",""],
+          ["OTROS","",""],
           ...otros.filter(o=>o.tipo==="ingreso").map(o=>["  (+) "+o.conc+" ("+o.cur+")",toUSD(o.monto,o.cur),""]),
           ...otros.filter(o=>o.tipo==="gasto").map(o=>["  (-) "+o.conc+" ("+o.cur+")",-toUSD(o.monto,o.cur),""]),
           ["  = Neto Otros",st.oIng-st.oGas,""],["","",""],
           ["UTILIDAD ANTES DE IMPUESTOS",st.uAnte,st.vBruta>0?pct2(st.uAnte/st.vBruta):""],["","",""],
-          ["IMPUESTOS","",""],
-          ["  ONAT Total (equiv. USD informal)",onat.usd_inf,""],
-          ["  ISR/Otros",toUSD(imp.isr,imp.curIsr),""],["  PTU",toUSD(imp.ptu,imp.curPtu),""],
-          ["  = Total",st.totImp,""],["","",""],
-          ["UTILIDAD NETA",st.uNeta,st.vBruta>0?pct2(st.mnr):""]
-        ];
+          ["ONAT (equiv. USD informal)",onat.usd_inf,""],
+          ["UTILIDAD NETA",st.uNeta,st.vBruta>0?pct2(st.mnr):""]];
         const ws1=XLSX.utils.aoa_to_sheet(er);ws1["!cols"]=[{wch:52},{wch:20},{wch:12}];
         XLSX.utils.book_append_sheet(wb,ws1,"Estado de Resultados");
-        const onatS=[
-          ["CÁLCULO ONAT — AGENCIA TRIBUTARIA CUBA",""],
-          [cfg.nombre,""],[cfg.mes+" "+cfg.anio,""],["",""],
-          ["Tasa oficial utilizada:","1 USD = "+cfg.CUP_of+" CUP"],
-          ["Tasa informal (referencia):","1 USD = "+cfg.CUP_inf+" CUP"],["",""],
-          ["CONCEPTO","MONTO CUP"],["",""],
-          ["1. IMPUESTO SOBRE LAS VENTAS (11%)",""],
-          ["   Ventas totales (USD)",st.vBruta],
-          ["   Ventas en CUP (tasa oficial)",onat.ventasCUP],
-          ["   = 11% s/ Ventas",onat.impVentas],["",""],
-          ["2. IMPUESTO SOBRE LOS INGRESOS (35%)",""],
-          ["   Utilidad antes imp. (USD)",st.uAnte],
-          ["   Utilidad en CUP (tasa oficial)",onat.utilCUP],
-          ["   = 35% s/ Ingresos (si utilidad > 0)",onat.impIngresos],["",""],
-          ["TOTAL A PAGAR ONAT (CUP)",onat.totalONAT],["",""],
-          ["EQUIVALENCIAS DEL TOTAL ONAT",""],
-          ["   En USD (tasa oficial)",onat.usd_of],
-          ["   En USD (tasa informal / real)",onat.usd_inf],["",""],
-          ["NOTA: Cálculos orientativos. Confirmar con gestor ONAT.",""]
-        ];
-        const ws_o=XLSX.utils.aoa_to_sheet(onatS);ws_o["!cols"]=[{wch:45},{wch:22}];
-        XLSX.utils.book_append_sheet(wb,ws_o,"ONAT");
-        const vd=[["VENTA#","FECHA","CLIENTE","VENDEDOR","COM%","PRODUCTO","CANT","P.VENTA","MONEDA","SUBTOTAL ORIG","SUBTOTAL USD","COSTO USD","MARGEN","COMISIÓN USD"]];
-        ventas.forEach(v=>{
-          v.items.forEach(i=>{
-            const prod=prods.find(x=>x.id===i.pid);
-            const sub=num(i.qty)*toUSD(i.punit,i.cur);const ct=num(i.qty)*(costProm[i.pid]||0);
-            vd.push([v.id,v.fecha,v.cli,v.vend,num(v.com)/100,prod?prod.nom:"?",num(i.qty),num(i.punit),i.cur,num(i.qty)*num(i.punit),sub,ct,sub>0?(sub-ct)/sub:0,sub*num(v.com)/100]);
-          });
-        });
+        const onatS=[["CÁLCULO ONAT",""],["",""],
+          ["Tasa oficial: 1 USD = "+cfg.CUP_of+" CUP",""],["Tasa informal: 1 USD = "+cfg.CUP_inf+" CUP",""],["",""],
+          ["CONCEPTO","MONTO CUP"],
+          ["Ventas totales (USD)",st.vBruta],["Ventas en CUP (oficial)",onat.ventasCUP],["11% Impuesto s/ Ventas",onat.impVentas],["",""],
+          ["Utilidad antes imp. (USD)",st.uAnte],["Utilidad en CUP (oficial)",onat.utilCUP],["35% Impuesto s/ Ingresos",onat.impIngresos],["",""],
+          ["TOTAL ONAT (CUP)",onat.totalONAT],["Equiv. USD (oficial)",onat.usd_of],["Equiv. USD (informal)",onat.usd_inf]];
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(onatS),"ONAT");
+        const vd=[["VENTA#","FECHA","CLIENTE","VENDEDOR","COM%","PRODUCTO","CANT","P.VENTA","MONEDA","SUBTOTAL USD","COSTO USD","MARGEN","COMISIÓN"]];
+        ventas.forEach(v=>{v.items.forEach(i=>{const prod=prods.find(x=>x.id===i.pid);const sub=num(i.qty)*toUSD(i.punit,i.cur);const ct=num(i.qty)*(costProm[i.pid]||0);vd.push([v.id,v.fecha,v.cli,v.vend,num(v.com)/100,prod?prod.nom:"?",num(i.qty),num(i.punit),i.cur,sub,ct,sub>0?(sub-ct)/sub:0,sub*num(v.com)/100]);});});
         XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(vd),"Ventas Detalladas");
-        const cd=[["#","FECHA","PROVEEDOR","PRODUCTO","CANT","P.COSTO","MONEDA","TOTAL ORIG","TOTAL USD"]];
-        compras.forEach(c=>{const p=prods.find(x=>x.id===c.pid);const cu=toUSD(c.punit,c.cur);cd.push([c.id,c.fecha,c.prov,p?p.nom:"?",num(c.qty),num(c.punit),c.cur,num(c.qty)*num(c.punit),num(c.qty)*cu]);});
+        const cd=[["FECHA","PROVEEDOR","PRODUCTO","CANT","P.COSTO","MONEDA","TOTAL USD"]];
+        compras.forEach(c=>{const p=prods.find(x=>x.id===c.pid);cd.push([c.fecha,c.prov,p?p.nom:"?",num(c.qty),num(c.punit),c.cur,num(c.qty)*toUSD(c.punit,c.cur)]);});
         XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(cd),"Compras");
-        const gd=[["CATEGORÍA","CONCEPTO","MONTO","MONEDA","EQUIV USD"]];
-        gd.push(["Comisiones s/ventas","(automático)",st.comis,"USD",st.comis]);
+        const gd=[["CATEGORÍA","CONCEPTO","MONTO","MONEDA","USD"]];
         gastos.forEach(g=>gd.push([g.cat,g.conc,num(g.monto),g.cur,toUSD(g.monto,g.cur)]));
         XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(gd),"Gastos");
-        const comd=[["VENDEDOR","VENTAS USD","%COM","COMISIÓN USD"]];
+        const comd=[["VENDEDOR","VENTAS USD","COMISIÓN USD"]];
         const bV={};ventas.forEach(v=>{const t=v.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0);if(!bV[v.vend])bV[v.vend]={v:0,c:0};bV[v.vend].v+=t;bV[v.vend].c+=t*num(v.com)/100;});
-        Object.entries(bV).forEach(([vend,d])=>comd.push([vend,d.v,d.v>0?d.c/d.v:0,d.c]));
+        Object.entries(bV).forEach(([vend,d])=>comd.push([vend,d.v,d.c]));
         XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(comd),"Comisiones");
         XLSX.writeFile(wb,"ER_"+cfg.nombre.replace(/\s+/g,"_")+"_"+cfg.mes+cfg.anio+".xlsx");
       };
 
+      // ── Styles ──
       const BG="#0d1b0e",MID="#152218",MID2="#1a2d1c",ACE="#52b788",GOLD="#f4a228",MUTED="#6d9073",LIGHT="#e4ede5",RED="#e05252",BLUE="#5ba3d9",PUR="#c084fc";
       const inp={padding:"7px 10px",border:"1px solid #223d25",borderRadius:4,background:"#0d1b0e",color:LIGHT,fontSize:12,outline:"none",fontFamily:"inherit",width:"100%",boxSizing:"border-box"};
       const lbl={fontSize:10,color:MUTED,marginBottom:3,display:"block",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em"};
       const TH={background:MID2,color:MUTED,fontSize:10,fontWeight:700,padding:"9px 11px",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.06em",borderBottom:"1px solid #223d25",whiteSpace:"nowrap"};
       const TD=(col)=>({padding:"8px 11px",fontSize:12,color:col||LIGHT,borderBottom:"1px solid "+MID2});
       const card={background:MID,borderRadius:6,padding:"18px 20px",marginBottom:14};
-      const btn=(v)=>({padding:v==="sm"?"4px 10px":"8px 18px",background:v==="d"?RED:v==="g"?GOLD:ACE,color:v==="g"?"#1a0e00":BG,border:"none",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"});
+      const btn=(v)=>({padding:v==="sm"?"4px 10px":"8px 18px",background:v==="d"?RED:v==="g"?GOLD:v==="pur"?PUR:ACE,color:v==="g"?"#1a0e00":v==="pur"?BG:BG,border:"none",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"});
       const tabB=(t)=>({padding:"7px 13px",background:tab===t?ACE:"transparent",color:tab===t?BG:MUTED,border:"none",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"});
       const row=(g)=>({display:"flex",gap:g||8,flexWrap:"wrap",marginBottom:g||8});
       const fld=(w)=>({display:"flex",flexDirection:"column",flex:w||1,minWidth:80});
       const curCol=(cur)=>cur==='USD'?GOLD:cur==='EUR'?BLUE:PUR;
       const curBadge=(cur)=><span style={{fontSize:9,fontWeight:800,padding:"2px 5px",borderRadius:3,background:curCol(cur)+'22',color:curCol(cur),fontFamily:"monospace"}}>{cur}</span>;
-      const CurSel=({value,onChange})=>(
-        <select style={{...inp,width:68,flex:'none',borderLeft:'none',borderRadius:'0 4px 4px 0',color:curCol(value),fontWeight:700}} value={value} onChange={e=>onChange(e.target.value)}>
-          {CURRENCIES.map(c=><option key={c} style={{color:LIGHT}}>{c}</option>)}
-        </select>
-      );
-      const AmtCur=({amt,cur,onAmtChange,onCurChange,placeholder})=>(
-        <div style={{display:"flex"}}>
-          <input style={{...inp,borderRadius:"4px 0 0 4px",flex:1}} type="number" value={amt} onChange={e=>onAmtChange(e.target.value)} placeholder={placeholder||"0.00"}/>
-          <CurSel value={cur} onChange={onCurChange}/>
-        </div>
-      );
+      const CurSel=({value,onChange})=>(<select style={{...inp,width:68,flex:'none',borderLeft:'none',borderRadius:'0 4px 4px 0',color:curCol(value),fontWeight:700}} value={value} onChange={e=>onChange(e.target.value)}>{CURRENCIES.map(c=><option key={c} style={{color:LIGHT}}>{c}</option>)}</select>);
+      const AmtCur=({amt,cur,onAmtChange,onCurChange,ph})=>(<div style={{display:"flex"}}><input style={{...inp,borderRadius:"4px 0 0 4px",flex:1}} type="number" value={amt} onChange={e=>onAmtChange(e.target.value)} placeholder={ph||"0.00"}/><CurSel value={cur} onChange={onCurChange}/></div>);
       const SRow=({label,val,indent,bold,big})=>{
         indent=indent||0;bold=bold||false;big=big||false;
         const v=num(val),isPos=v>=0,tc=big?(isPos?ACE:RED):(bold?LIGHT:MUTED);
@@ -221,31 +337,119 @@
         </div>);
       };
 
+      const syncColor = syncStatus==='ok'?ACE:syncStatus==='error'?RED:syncStatus==='saving'||syncStatus==='connecting'?GOLD:MUTED;
+      const monthKeys = Object.keys(allMonths).sort((a,b)=>b.localeCompare(a));
+
       return (
         <div style={{background:BG,minHeight:"100vh",color:LIGHT,fontFamily:"'Segoe UI',system-ui,sans-serif",fontSize:13}}>
+
+          {/* HEADER */}
           <div style={{background:MID,padding:"12px 20px",borderBottom:"3px solid "+ACE,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
             <div>
               <div style={{fontSize:16,fontWeight:800,color:ACE}}>📒 {cfg.nombre}</div>
               <div style={{fontSize:10,color:MUTED,marginTop:2,fontFamily:"monospace"}}>Estado de Resultados · {cfg.mes} {cfg.anio} · USD / CUP / EUR</div>
             </div>
-            <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-              <div style={{fontSize:11,color:MUTED,fontFamily:"monospace"}}>
-                Ventas <span style={{color:ACE,fontWeight:700}}>{fmtM(st.vBruta)}</span>
-                {" · "}Utilidad <span style={{color:num(st.uNeta)>=0?ACE:RED,fontWeight:700}}>{fmtM(st.uNeta)}</span>
-                {" · "}ONAT <span style={{color:PUR,fontWeight:700}}>{fmtCUP(onat.totalONAT)}</span>
-              </div>
-              <button onClick={exportXL} style={{...btn("g"),padding:"9px 20px",fontSize:12}}>⬇ Exportar Excel</button>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              {ghToken && <div style={{fontSize:10,color:syncColor,fontFamily:"monospace",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{syncMsg||"Conectado"}</div>}
+              {ghToken && <button onClick={saveMonth} style={{...btn("pur"),padding:"8px 14px"}} disabled={syncStatus==='saving'}>
+                {syncStatus==='saving'?'Guardando...':'💾 Guardar Mes'}
+              </button>}
+              <button onClick={exportXL} style={{...btn("g"),padding:"8px 14px"}}>⬇ Excel</button>
             </div>
           </div>
 
+          {/* SYNC BANNER (no token) */}
+          {!ghToken && (
+            <div style={{background:"#1a1230",borderBottom:"2px solid "+PUR,padding:"12px 20px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <div style={{fontSize:11,color:PUR,fontWeight:700}}>🔗 Conecta con GitHub para guardar y consultar meses anteriores</div>
+              <input style={{...inp,maxWidth:340,borderColor:PUR+'55'}} value={tokenInput} onChange={e=>setTokenInput(e.target.value)} placeholder="Pega aquí tu Personal Access Token de GitHub" type="password"/>
+              <button onClick={connectGitHub} style={btn("pur")} disabled={syncStatus==='connecting'}>{syncStatus==='connecting'?'Conectando...':'Conectar'}</button>
+              {syncStatus==='error' && <span style={{fontSize:11,color:RED}}>{syncMsg}</span>}
+              <a href="#config-sync" onClick={()=>setTab('config')} style={{fontSize:10,color:MUTED,textDecoration:"underline",cursor:"pointer"}}>¿Cómo obtengo el token?</a>
+            </div>
+          )}
+
+          {/* TABS */}
           <div style={{background:MID,padding:"8px 16px",display:"flex",gap:4,flexWrap:"wrap",borderBottom:"1px solid #223d25"}}>
-            {[["config","⚙ Config"],["prods","📦 Productos"],["compras","🛒 Compras"],["ventas","💰 Ventas"],["gastos","🏢 Gastos"],["otros","🔄 Otros"],["onat","🏛 ONAT"],["resultados","📊 Resultados"]].map(([t,l])=>(
+            {[["meses","📁 Mis Meses"],["config","⚙ Config"],["prods","📦 Productos"],["compras","🛒 Compras"],["ventas","💰 Ventas"],["gastos","🏢 Gastos"],["otros","🔄 Otros"],["onat","🏛 ONAT"],["resultados","📊 Resultados"]].map(([t,l])=>(
               <button key={t} style={tabB(t)} onClick={()=>setTab(t)}>{l}</button>
             ))}
           </div>
 
           <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
 
+            {/* ─── MIS MESES ─── */}
+            {tab==="meses" && (
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:700,color:ACE}}>📁 Historial de Meses Guardados</div>
+                    <div style={{fontSize:11,color:MUTED,marginTop:3}}>{monthKeys.length} mes(es) guardado(s) en tu cuenta de GitHub</div>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={newMonth} style={btn()}>+ Nuevo Mes</button>
+                    {ghToken && <button onClick={saveMonth} style={btn("pur")} disabled={syncStatus==='saving'}>{syncStatus==='saving'?'Guardando...':'💾 Guardar Mes Actual'}</button>}
+                  </div>
+                </div>
+
+                {!ghToken && (
+                  <div style={{...card,borderTop:"2px solid "+PUR,textAlign:"center",padding:"30px 20px"}}>
+                    <div style={{fontSize:24,marginBottom:10}}>🔗</div>
+                    <div style={{fontSize:13,color:LIGHT,marginBottom:6}}>Conecta con GitHub para ver tus meses guardados</div>
+                    <div style={{fontSize:11,color:MUTED,marginBottom:14}}>El banner azul-morado arriba tiene el campo para pegar tu token</div>
+                    <div style={{fontSize:11,color:MUTED}}>¿No tienes token? Ve a la pestaña <strong style={{color:ACE}}>⚙ Config</strong> y sigue las instrucciones.</div>
+                  </div>
+                )}
+
+                {ghToken && monthKeys.length===0 && (
+                  <div style={{...card,textAlign:"center",padding:"30px 20px"}}>
+                    <div style={{fontSize:24,marginBottom:10}}>📭</div>
+                    <div style={{fontSize:13,color:LIGHT,marginBottom:6}}>Aún no hay meses guardados</div>
+                    <div style={{fontSize:11,color:MUTED}}>Ingresa los datos del mes actual y haz clic en <strong style={{color:PUR}}>💾 Guardar Mes</strong></div>
+                  </div>
+                )}
+
+                {ghToken && monthKeys.length>0 && (
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+                    {monthKeys.map(key=>{
+                      const m = allMonths[key];
+                      const mst = (() => {
+                        try {
+                          const vB = (m.ventas||[]).reduce((s,v)=>s+v.items.reduce((ss,i)=>ss+num(i.qty)*num(i.punit),0),0);
+                          const gOp = (m.gastos||[]).reduce((s,g)=>s+num(g.monto),0);
+                          return { ventas: vB, gastos: gOp };
+                        } catch(e) { return { ventas:0, gastos:0 }; }
+                      })();
+                      const savedDate = m.savedAt ? new Date(m.savedAt).toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+                      const isCurrent = m.cfg && m.cfg.mes===cfg.mes && m.cfg.anio===cfg.anio;
+                      return (
+                        <div key={key} style={{background:MID,borderRadius:6,padding:"16px 18px",border:"1px solid "+(isCurrent?ACE:'#223d25'),position:"relative"}}>
+                          {isCurrent && <div style={{position:"absolute",top:10,right:10,fontSize:9,background:ACE,color:BG,padding:"2px 6px",borderRadius:10,fontWeight:700}}>MES ACTUAL</div>}
+                          <div style={{fontSize:16,fontWeight:800,color:ACE,marginBottom:2}}>{key}</div>
+                          <div style={{fontSize:10,color:MUTED,marginBottom:10}}>Guardado: {savedDate}</div>
+                          <div style={{display:"flex",gap:8,marginBottom:12}}>
+                            <div style={{flex:1,background:BG,borderRadius:4,padding:"8px 10px"}}>
+                              <div style={{fontSize:9,color:MUTED,marginBottom:2}}>VENTAS</div>
+                              <div style={{fontSize:13,fontWeight:700,color:ACE,fontFamily:"monospace"}}>${num(m.cfg?.invIni||0).toFixed(0)}</div>
+                            </div>
+                            <div style={{flex:1,background:BG,borderRadius:4,padding:"8px 10px"}}>
+                              <div style={{fontSize:9,color:MUTED,marginBottom:2}}>REGISTROS</div>
+                              <div style={{fontSize:13,fontWeight:700,color:GOLD,fontFamily:"monospace"}}>{(m.ventas||[]).length}v · {(m.compras||[]).length}c</div>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:6}}>
+                            <button onClick={()=>loadMonth(key)} style={{...btn(),flex:1}}>📂 Cargar</button>
+                            <button onClick={()=>deleteMonth(key)} style={{...btn("d"),padding:"8px 12px"}}>🗑</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ─── CONFIG ─── */}
             {tab==="config" && (
               <div>
                 <div style={card}>
@@ -258,67 +462,98 @@
                     <div style={fld(2)}><span style={lbl}>Inventario inicial (USD)</span><input style={inp} type="number" value={cfg.invIni} onChange={e=>setCfg(c=>({...c,invIni:e.target.value}))} placeholder="0.00"/></div>
                   </div>
                 </div>
+
                 <div style={{...card,borderTop:"3px solid "+GOLD}}>
                   <div style={{fontSize:13,fontWeight:700,color:GOLD,marginBottom:6}}>💱 Tipos de Cambio</div>
-                  <div style={{fontSize:11,color:MUTED,marginBottom:14,lineHeight:1.7}}>
-                    Cuba tiene dos tasas. La <strong style={{color:PUR}}>oficial</strong> es la que usa la ONAT para calcular impuestos.
-                    La <strong style={{color:GOLD}}>informal</strong> es la realidad del mercado y se usa en el estado de resultados real.
-                  </div>
                   <div style={row(14)}>
                     <div style={fld(1)}>
-                      <span style={{...lbl,color:PUR}}>1 USD = ? CUP (Tasa Oficial ONAT)</span>
+                      <span style={{...lbl,color:PUR}}>1 USD = ? CUP (Oficial ONAT)</span>
                       <input style={{...inp,borderColor:PUR+'55'}} type="number" value={cfg.CUP_of} onChange={e=>setCfg(c=>({...c,CUP_of:e.target.value}))} placeholder="24"/>
-                      <span style={{fontSize:10,color:MUTED,marginTop:3,display:"block"}}>Para calcular impuestos ONAT</span>
                     </div>
                     <div style={fld(1)}>
-                      <span style={{...lbl,color:GOLD}}>1 USD = ? CUP (Tasa Informal/Mercado)</span>
+                      <span style={{...lbl,color:GOLD}}>1 USD = ? CUP (Informal)</span>
                       <input style={{...inp,borderColor:GOLD+'55'}} type="number" value={cfg.CUP_inf} onChange={e=>setCfg(c=>({...c,CUP_inf:e.target.value}))} placeholder="250"/>
-                      <span style={{fontSize:10,color:MUTED,marginTop:3,display:"block"}}>Para el estado de resultados real</span>
                     </div>
                     <div style={fld(1)}>
                       <span style={{...lbl,color:BLUE}}>1 EUR = ? USD</span>
                       <input style={{...inp,borderColor:BLUE+'55'}} type="number" value={cfg.EUR_usd} onChange={e=>setCfg(c=>({...c,EUR_usd:e.target.value}))} placeholder="1.08"/>
-                      <span style={{fontSize:10,color:MUTED,marginTop:3,display:"block"}}>Tipo de cambio EUR/USD</span>
                     </div>
                   </div>
-                  <div style={{marginTop:12,padding:"10px 14px",background:BG,borderRadius:4,fontSize:11,color:MUTED,lineHeight:1.8}}>
-                    <strong style={{color:GOLD}}>Tasas activas:</strong>{"  "}
-                    <span style={{color:PUR,fontFamily:"monospace"}}>1 USD = {cfg.CUP_of} CUP (oficial)</span>{"  ·  "}
-                    <span style={{color:GOLD,fontFamily:"monospace"}}>1 USD = {cfg.CUP_inf} CUP (informal)</span>{"  ·  "}
-                    <span style={{color:BLUE,fontFamily:"monospace"}}>1 EUR = {cfg.EUR_usd} USD</span>
-                  </div>
+                </div>
+
+                <div id="config-sync" style={{...card,borderTop:"3px solid "+PUR}}>
+                  <div style={{fontSize:13,fontWeight:700,color:PUR,marginBottom:10}}>🔗 Sincronización con GitHub</div>
+                  {ghToken ? (
+                    <div>
+                      <div style={{padding:"10px 14px",background:BG,borderRadius:4,marginBottom:12}}>
+                        <div style={{fontSize:11,color:ACE,fontWeight:700}}>✓ Conectado</div>
+                        <div style={{fontSize:11,color:MUTED,marginTop:3}}>Meses guardados: <strong style={{color:LIGHT}}>{monthKeys.length}</strong></div>
+                        <div style={{fontSize:10,color:MUTED,marginTop:2,fontFamily:"monospace"}}>Gist ID: {gistId.slice(0,16)}...</div>
+                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <button onClick={saveMonth} style={btn("pur")} disabled={syncStatus==='saving'}>{syncStatus==='saving'?'Guardando...':'💾 Guardar Mes Actual'}</button>
+                        <button onClick={()=>{if(confirm('¿Desconectar GitHub? No se eliminan tus datos guardados.')){localStorage.removeItem('gh_token');localStorage.removeItem('gist_id');setGhToken('');setGistId('');setAllMonths({});setSyncStatus('notoken');setSyncMsg('');}}} style={btn("d")}>Desconectar</button>
+                      </div>
+                      {syncMsg && <div style={{fontSize:11,color:syncColor,marginTop:8}}>{syncMsg}</div>}
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{fontSize:11,color:MUTED,marginBottom:12,lineHeight:1.8}}>
+                        Para guardar tus meses y acceder desde cualquier dispositivo, necesitas un <strong style={{color:LIGHT}}>Personal Access Token</strong> de GitHub.
+                        <br/><br/>
+                        <strong style={{color:ACE}}>Cómo obtenerlo (5 minutos):</strong><br/>
+                        1. Entra a <strong style={{color:LIGHT}}>github.com</strong> → foto de perfil → <strong style={{color:LIGHT}}>Settings</strong><br/>
+                        2. Baja al final → <strong style={{color:LIGHT}}>Developer settings</strong><br/>
+                        3. <strong style={{color:LIGHT}}>Personal access tokens</strong> → <strong style={{color:LIGHT}}>Tokens (classic)</strong><br/>
+                        4. <strong style={{color:LIGHT}}>Generate new token (classic)</strong><br/>
+                        5. Nombre: <strong style={{color:LIGHT}}>almacen-app</strong> · Expiración: <strong style={{color:LIGHT}}>No expiration</strong><br/>
+                        6. Marca solo: <strong style={{color:GOLD}}>✓ gist</strong><br/>
+                        7. <strong style={{color:LIGHT}}>Generate token</strong> → copiarlo inmediatamente
+                      </div>
+                      <div style={row(8)}>
+                        <div style={fld(3)}>
+                          <span style={lbl}>Personal Access Token</span>
+                          <input style={{...inp,borderColor:PUR+'55'}} value={tokenInput} onChange={e=>setTokenInput(e.target.value)} placeholder="ghp_xxxxxxxxxxxxxxxx" type="password"/>
+                        </div>
+                        <div style={{alignSelf:"flex-end",paddingBottom:1}}>
+                          <button onClick={connectGitHub} style={btn("pur")} disabled={syncStatus==='connecting'}>{syncStatus==='connecting'?'Conectando...':'Conectar'}</button>
+                        </div>
+                      </div>
+                      {syncStatus==='error' && <div style={{fontSize:11,color:RED,marginTop:6}}>{syncMsg}</div>}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
+            {/* ─── PRODUCTOS ─── */}
             {tab==="prods" && (
               <div>
                 <div style={card}>
                   <div style={{fontSize:13,fontWeight:700,color:ACE,marginBottom:12}}>📦 Catálogo de Productos</div>
                   <div style={row(8)}>
                     <div style={fld(4)}><span style={lbl}>Nombre del Producto</span><input style={inp} value={fp.nom} onChange={e=>setFp(p=>({...p,nom:e.target.value}))} placeholder="Ej: Azúcar 50kg"/></div>
-                    <div style={fld(1)}><span style={lbl}>Unidad</span><input style={inp} value={fp.uni} onChange={e=>setFp(p=>({...p,uni:e.target.value}))} placeholder="pza, kg, litro"/></div>
+                    <div style={fld(1)}><span style={lbl}>Unidad</span><input style={inp} value={fp.uni} onChange={e=>setFp(p=>({...p,uni:e.target.value}))} placeholder="pza, kg"/></div>
                     <div style={{alignSelf:"flex-end",paddingBottom:1}}><button onClick={addProd} style={btn()}>+ Agregar</button></div>
                   </div>
                 </div>
-                {prods.length>0 && (
-                  <div style={{...card,padding:0,overflow:"hidden"}}>
-                    <table style={{width:"100%",borderCollapse:"collapse"}}>
-                      <thead><tr><th style={TH}>#</th><th style={TH}>Producto</th><th style={TH}>Unidad</th><th style={TH}>Costo Prom. (USD)</th><th style={TH}>Comprado</th><th style={TH}>Vendido</th><th style={TH}>Disponible</th><th style={TH}></th></tr></thead>
-                      <tbody>
-                        {prods.map((p,i)=>{
-                          const tq=compras.filter(c=>c.pid===p.id).reduce((s,c)=>s+num(c.qty),0);
-                          const vq=ventas.reduce((s,v)=>s+v.items.filter(i=>i.pid===p.id).reduce((ss,i)=>ss+num(i.qty),0),0);
-                          return(<tr key={p.id}><td style={TD(MUTED)}>{i+1}</td><td style={TD()}>{p.nom}</td><td style={TD(MUTED)}>{p.uni}</td><td style={TD(GOLD)}>{fmtM(costProm[p.id]||0)}</td><td style={TD()}>{tq} {p.uni}</td><td style={TD()}>{vq} {p.uni}</td><td style={TD(tq-vq>=0?ACE:RED)}>{tq-vq} {p.uni}</td><td style={TD()}><button onClick={()=>delProd(p.id)} style={btn("d")}>✕</button></td></tr>);
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {prods.length===0 && <div style={{...card,color:MUTED,fontSize:12,textAlign:"center"}}>Sin productos aún. Agrega uno arriba.</div>}
+                {prods.length>0 && (<div style={{...card,padding:0,overflow:"hidden"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead><tr><th style={TH}>#</th><th style={TH}>Producto</th><th style={TH}>Unidad</th><th style={TH}>Costo Prom. USD</th><th style={TH}>Comprado</th><th style={TH}>Vendido</th><th style={TH}>Disponible</th><th style={TH}></th></tr></thead>
+                    <tbody>
+                      {prods.map((p,i)=>{
+                        const tq=compras.filter(c=>c.pid===p.id).reduce((s,c)=>s+num(c.qty),0);
+                        const vq=ventas.reduce((s,v)=>s+v.items.filter(i=>i.pid===p.id).reduce((ss,i)=>ss+num(i.qty),0),0);
+                        return(<tr key={p.id}><td style={TD(MUTED)}>{i+1}</td><td style={TD()}>{p.nom}</td><td style={TD(MUTED)}>{p.uni}</td><td style={TD(GOLD)}>{fmtM(costProm[p.id]||0)}</td><td style={TD()}>{tq} {p.uni}</td><td style={TD()}>{vq} {p.uni}</td><td style={TD(tq-vq>=0?ACE:RED)}>{tq-vq} {p.uni}</td><td style={TD()}><button onClick={()=>delProd(p.id)} style={btn("d")}>✕</button></td></tr>);
+                      })}
+                    </tbody>
+                  </table>
+                </div>)}
+                {prods.length===0 && <div style={{...card,color:MUTED,fontSize:12,textAlign:"center"}}>Sin productos aún.</div>}
               </div>
             )}
 
+            {/* ─── COMPRAS ─── */}
             {tab==="compras" && (
               <div>
                 <div style={card}>
@@ -339,29 +574,23 @@
                   </div>
                   {fc.qty&&fc.punit&&<div style={{fontSize:11,color:MUTED,marginTop:4}}>Total: <span style={{color:ACE,fontWeight:700}}>{fmtEq(num(fc.qty)*num(fc.punit),fc.cur)}</span></div>}
                 </div>
-                {compras.length>0 && (
-                  <div style={{...card,padding:0,overflowX:"auto"}}>
-                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:640}}>
-                      <thead><tr><th style={TH}>Fecha</th><th style={TH}>Proveedor</th><th style={TH}>Producto</th><th style={TH}>Cant.</th><th style={TH}>P.Costo</th><th style={TH}>Mon.</th><th style={TH}>Total orig.</th><th style={TH}>≈ USD</th><th style={TH}></th></tr></thead>
-                      <tbody>
-                        {compras.map(c=>(
-                          <tr key={c.id}>
-                            <td style={TD(MUTED)}>{c.fecha||"—"}</td><td style={TD()}>{c.prov||"—"}</td>
-                            <td style={TD()}>{pNom(c.pid)}</td><td style={TD()}>{num(c.qty)} {pUni(c.pid)}</td>
-                            <td style={TD(curCol(c.cur))}>{fmtC(c.punit,c.cur)}</td>
-                            <td style={TD()}>{curBadge(c.cur)}</td>
-                            <td style={TD(LIGHT)}>{fmtC(num(c.qty)*num(c.punit),c.cur)}</td>
-                            <td style={TD(MUTED)}>{fmtM(num(c.qty)*toUSD(c.punit,c.cur))}</td>
-                            <td style={TD()}><button onClick={()=>delComp(c.id)} style={btn("d")}>✕</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                {compras.length>0 && (<div style={{...card,padding:0,overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",minWidth:600}}>
+                    <thead><tr><th style={TH}>Fecha</th><th style={TH}>Proveedor</th><th style={TH}>Producto</th><th style={TH}>Cant.</th><th style={TH}>P.Costo</th><th style={TH}>Mon.</th><th style={TH}>≈ USD</th><th style={TH}></th></tr></thead>
+                    <tbody>
+                      {compras.map(c=>(<tr key={c.id}>
+                        <td style={TD(MUTED)}>{c.fecha||"—"}</td><td style={TD()}>{c.prov||"—"}</td><td style={TD()}>{pNom(c.pid)}</td><td style={TD()}>{num(c.qty)} {pUni(c.pid)}</td>
+                        <td style={TD(curCol(c.cur))}>{fmtC(c.punit,c.cur)}</td><td style={TD()}>{curBadge(c.cur)}</td>
+                        <td style={TD(MUTED)}>{fmtM(num(c.qty)*toUSD(c.punit,c.cur))}</td>
+                        <td style={TD()}><button onClick={()=>delComp(c.id)} style={btn("d")}>✕</button></td>
+                      </tr>))}
+                    </tbody>
+                  </table>
+                </div>)}
               </div>
             )}
 
+            {/* ─── VENTAS ─── */}
             {tab==="ventas" && (
               <div>
                 <div style={card}>
@@ -385,100 +614,69 @@
                       <div style={fld(2)}><span style={lbl}>Precio Venta + Moneda</span><AmtCur amt={fvi.punit} cur={fvi.cur} onAmtChange={v=>setFvi(i=>({...i,punit:v}))} onCurChange={v=>setFvi(i=>({...i,cur:v}))}/></div>
                       <div style={{alignSelf:"flex-end",paddingBottom:1}}><button onClick={addVItem} style={btn()}>+ Agregar</button></div>
                     </div>
-                    {fvi.pid&&fvi.qty&&fvi.punit&&(()=>{
-                      const sub=num(fvi.qty)*toUSD(fvi.punit,fvi.cur),cost=num(fvi.qty)*(costProm[fvi.pid]||0),mg=sub>0?(sub-cost)/sub:0;
-                      return<div style={{fontSize:11,color:MUTED,marginTop:6}}>Subtotal: <span style={{color:ACE}}>{fmtEq(num(fvi.qty)*num(fvi.punit),fvi.cur)}</span>{" · "}Costo: {fmtM(cost)}{" · "}Margen: <span style={{color:mg>=0.2?ACE:mg>=0?GOLD:RED}}>{(mg*100).toFixed(1)}%</span></div>;
-                    })()}
+                    {fvi.pid&&fvi.qty&&fvi.punit&&(()=>{const sub=num(fvi.qty)*toUSD(fvi.punit,fvi.cur),cost=num(fvi.qty)*(costProm[fvi.pid]||0),mg=sub>0?(sub-cost)/sub:0;return<div style={{fontSize:11,color:MUTED,marginTop:6}}>Subtotal: <span style={{color:ACE}}>{fmtEq(num(fvi.qty)*num(fvi.punit),fvi.cur)}</span> · Margen: <span style={{color:mg>=0.2?ACE:mg>=0?GOLD:RED}}>{(mg*100).toFixed(1)}%</span></div>;})()}
                   </div>
-                  {fv.items.length>0 && (
-                    <div style={{marginBottom:12,overflowX:"auto"}}>
-                      <table style={{width:"100%",borderCollapse:"collapse",background:BG,borderRadius:4}}>
-                        <thead><tr><th style={TH}>Producto</th><th style={TH}>Cant.</th><th style={TH}>P.Venta</th><th style={TH}>Mon.</th><th style={TH}>≈ USD</th><th style={TH}>Costo USD</th><th style={TH}>Margen</th><th style={TH}></th></tr></thead>
-                        <tbody>
-                          {fv.items.map(i=>{
-                            const uv=toUSD(i.punit,i.cur),sub=num(i.qty)*uv,ct=num(i.qty)*(costProm[i.pid]||0),mg=sub>0?(sub-ct)/sub:0;
-                            return(<tr key={i.id}><td style={TD()}>{pNom(i.pid)}</td><td style={TD()}>{num(i.qty)} {pUni(i.pid)}</td><td style={TD(curCol(i.cur))}>{fmtC(i.punit,i.cur)}</td><td style={TD()}>{curBadge(i.cur)}</td><td style={TD(ACE)}>{fmtM(sub)}</td><td style={TD(MUTED)}>{fmtM(ct)}</td><td style={TD(mg>=0.2?ACE:mg>=0?GOLD:RED)}>{(mg*100).toFixed(1)}%</td><td style={TD()}><button onClick={()=>delVItem(i.id)} style={btn("d")}>✕</button></td></tr>);
-                          })}
-                          <tr style={{background:MID2}}>
-                            <td colSpan={4} style={{...TD(MUTED),fontWeight:700,textAlign:"right"}}>TOTAL VENTA (USD)</td>
-                            <td style={{...TD(ACE),fontWeight:700}}>{fmtM(fv.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0))}</td>
-                            <td style={{...TD(MUTED),fontWeight:700}}>{fmtM(fv.items.reduce((s,i)=>s+num(i.qty)*(costProm[i.pid]||0),0))}</td>
-                            <td colSpan={2} style={{...TD(GOLD),fontSize:11}}>Comisión {num(fv.com)}%: {fmtM(fv.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0)*num(fv.com)/100)}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  {fv.items.length>0&&(<div style={{marginBottom:12,overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",background:BG,borderRadius:4}}>
+                      <thead><tr><th style={TH}>Producto</th><th style={TH}>Cant.</th><th style={TH}>P.Venta</th><th style={TH}>Mon.</th><th style={TH}>≈ USD</th><th style={TH}>Costo</th><th style={TH}>Margen</th><th style={TH}></th></tr></thead>
+                      <tbody>
+                        {fv.items.map(i=>{const uv=toUSD(i.punit,i.cur),sub=num(i.qty)*uv,ct=num(i.qty)*(costProm[i.pid]||0),mg=sub>0?(sub-ct)/sub:0;return(<tr key={i.id}><td style={TD()}>{pNom(i.pid)}</td><td style={TD()}>{num(i.qty)} {pUni(i.pid)}</td><td style={TD(curCol(i.cur))}>{fmtC(i.punit,i.cur)}</td><td style={TD()}>{curBadge(i.cur)}</td><td style={TD(ACE)}>{fmtM(sub)}</td><td style={TD(MUTED)}>{fmtM(ct)}</td><td style={TD(mg>=0.2?ACE:mg>=0?GOLD:RED)}>{(mg*100).toFixed(1)}%</td><td style={TD()}><button onClick={()=>delVItem(i.id)} style={btn("d")}>✕</button></td></tr>);})}
+                        <tr style={{background:MID2}}><td colSpan={4} style={{...TD(MUTED),fontWeight:700,textAlign:"right"}}>TOTAL</td><td style={{...TD(ACE),fontWeight:700}}>{fmtM(fv.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0))}</td><td style={{...TD(MUTED),fontWeight:700}}>{fmtM(fv.items.reduce((s,i)=>s+num(i.qty)*(costProm[i.pid]||0),0))}</td><td colSpan={2} style={{...TD(GOLD),fontSize:11}}>Comisión: {fmtM(fv.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0)*num(fv.com)/100)}</td></tr>
+                      </tbody>
+                    </table>
+                  </div>)}
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <button onClick={addVenta} style={{...btn(),opacity:(!fv.cli||fv.items.length===0)?0.45:1}}>✓ Registrar Venta</button>
                     {(!fv.cli||fv.items.length===0)&&<span style={{fontSize:11,color:MUTED}}>Falta: {[!fv.cli&&"cliente",fv.items.length===0&&"producto"].filter(Boolean).join(", ")}</span>}
                   </div>
                 </div>
-                {ventas.length>0 && (
-                  <div>
-                    <div style={{fontSize:11,color:MUTED,marginBottom:8}}>{ventas.length} venta(s) · <span style={{color:ACE,fontWeight:700}}>{fmtM(st.vBruta)}</span> · Comisiones: <span style={{color:GOLD,fontWeight:700}}>{fmtM(st.comis)}</span></div>
-                    <div style={{...card,padding:0,overflowX:"auto"}}>
-                      <table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}>
-                        <thead><tr><th style={TH}>Fecha</th><th style={TH}>Cliente</th><th style={TH}>Vendedor</th><th style={TH}>Com%</th><th style={TH}>Total USD</th><th style={TH}>COGS</th><th style={TH}>Util.Bruta</th><th style={TH}>Comisión</th><th style={TH}></th></tr></thead>
-                        <tbody>
-                          {ventas.map(v=>{
-                            const tot=v.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0);
-                            const cogs=v.items.reduce((s,i)=>s+num(i.qty)*(costProm[i.pid]||0),0);
-                            return(<tr key={v.id}><td style={TD(MUTED)}>{v.fecha||"—"}</td><td style={TD()}>{v.cli}</td><td style={TD(MUTED)}>{v.vend||"—"}</td><td style={TD(GOLD)}>{num(v.com)}%</td><td style={TD(ACE)}>{fmtM(tot)}</td><td style={TD(MUTED)}>{fmtM(cogs)}</td><td style={TD(tot-cogs>=0?ACE:RED)}>{fmtM(tot-cogs)}</td><td style={TD(GOLD)}>{fmtM(tot*num(v.com)/100)}</td><td style={TD()}><button onClick={()=>delVenta(v.id)} style={btn("d")}>✕</button></td></tr>);
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                {ventas.length>0&&(<div>
+                  <div style={{fontSize:11,color:MUTED,marginBottom:8}}>{ventas.length} venta(s) · <span style={{color:ACE,fontWeight:700}}>{fmtM(st.vBruta)}</span> · Comisiones: <span style={{color:GOLD,fontWeight:700}}>{fmtM(st.comis)}</span></div>
+                  <div style={{...card,padding:0,overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:680}}>
+                      <thead><tr><th style={TH}>Fecha</th><th style={TH}>Cliente</th><th style={TH}>Vendedor</th><th style={TH}>Com%</th><th style={TH}>Total USD</th><th style={TH}>COGS</th><th style={TH}>Util.Bruta</th><th style={TH}>Comisión</th><th style={TH}></th></tr></thead>
+                      <tbody>
+                        {ventas.map(v=>{const tot=v.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0);const cogs=v.items.reduce((s,i)=>s+num(i.qty)*(costProm[i.pid]||0),0);return(<tr key={v.id}><td style={TD(MUTED)}>{v.fecha||"—"}</td><td style={TD()}>{v.cli}</td><td style={TD(MUTED)}>{v.vend||"—"}</td><td style={TD(GOLD)}>{num(v.com)}%</td><td style={TD(ACE)}>{fmtM(tot)}</td><td style={TD(MUTED)}>{fmtM(cogs)}</td><td style={TD(tot-cogs>=0?ACE:RED)}>{fmtM(tot-cogs)}</td><td style={TD(GOLD)}>{fmtM(tot*num(v.com)/100)}</td><td style={TD()}><button onClick={()=>delVenta(v.id)} style={btn("d")}>✕</button></td></tr>);})}
+                      </tbody>
+                    </table>
                   </div>
-                )}
+                </div>)}
               </div>
             )}
 
+            {/* ─── GASTOS ─── */}
             {tab==="gastos" && (
               <div>
                 <div style={card}>
                   <div style={{fontSize:13,fontWeight:700,color:ACE,marginBottom:6}}>🏢 Gastos Operativos</div>
-                  <div style={{fontSize:11,color:MUTED,marginBottom:12}}>Registra en USD, CUP o EUR. Todo se convierte automáticamente a USD (tasa informal) en el estado de resultados.</div>
+                  <div style={{fontSize:11,color:MUTED,marginBottom:12}}>En USD, CUP o EUR. Todo se convierte automáticamente a USD (tasa informal).</div>
                   <div style={row(8)}>
                     <div style={fld(2)}><span style={lbl}>Categoría</span><select style={inp} value={fg.cat} onChange={e=>setFg(g=>({...g,cat:e.target.value}))}>{GCATS.map(c=><option key={c}>{c}</option>)}</select></div>
                     <div style={fld(3)}><span style={lbl}>Concepto</span><input style={inp} value={fg.conc} onChange={e=>setFg(g=>({...g,conc:e.target.value}))} placeholder="Ej: Renta agosto, Sueldo..."/></div>
                     <div style={fld(2)}><span style={lbl}>Monto + Moneda</span><AmtCur amt={fg.monto} cur={fg.cur} onAmtChange={v=>setFg(g=>({...g,monto:v}))} onCurChange={v=>setFg(g=>({...g,cur:v}))}/></div>
                     <div style={{alignSelf:"flex-end",paddingBottom:1}}><button onClick={addGasto} style={btn()}>+ Agregar</button></div>
                   </div>
-                  {fg.monto&&fg.cur!=='USD'&&<div style={{fontSize:11,color:MUTED,marginTop:4}}>≈ <span style={{color:ACE,fontWeight:700}}>{fmtM(toUSD(fg.monto,fg.cur))}</span> USD (tasa informal)</div>}
+                  {fg.monto&&fg.cur!=='USD'&&<div style={{fontSize:11,color:MUTED,marginTop:4}}>≈ <span style={{color:ACE,fontWeight:700}}>{fmtM(toUSD(fg.monto,fg.cur))}</span> USD</div>}
                 </div>
                 <div style={{...card,padding:0,overflow:"hidden"}}>
                   <table style={{width:"100%",borderCollapse:"collapse"}}>
-                    <thead><tr><th style={TH}>Categoría</th><th style={TH}>Concepto</th><th style={TH}>Monto original</th><th style={TH}>Mon.</th><th style={TH}>≈ USD</th><th style={TH}></th></tr></thead>
+                    <thead><tr><th style={TH}>Categoría</th><th style={TH}>Concepto</th><th style={TH}>Monto</th><th style={TH}>Mon.</th><th style={TH}>≈ USD</th><th style={TH}></th></tr></thead>
                     <tbody>
-                      <tr style={{background:MID2}}>
-                        <td style={TD(MUTED)}>Comisiones s/ventas</td><td style={TD(MUTED)}>Automático ({ventas.length} ventas)</td>
-                        <td style={TD(GOLD)}>{fmtM(st.comis)}</td><td style={TD()}>{curBadge('USD')}</td><td style={TD(GOLD)}>{fmtM(st.comis)}</td><td style={TD()}></td>
-                      </tr>
-                      {gastos.map(g=>(
-                        <tr key={g.id}>
-                          <td style={TD(MUTED)}>{g.cat}</td><td style={TD()}>{g.conc}</td>
-                          <td style={TD(curCol(g.cur))}>{fmtC(g.monto,g.cur)}</td>
-                          <td style={TD()}>{curBadge(g.cur)}</td>
-                          <td style={TD(MUTED)}>{fmtM(toUSD(g.monto,g.cur))}</td>
-                          <td style={TD()}><button onClick={()=>delGasto(g.id)} style={btn("d")}>✕</button></td>
-                        </tr>
-                      ))}
-                      <tr style={{background:MID2}}>
-                        <td colSpan={4} style={{...TD(MUTED),fontWeight:700,textAlign:"right"}}>TOTAL GASTOS (USD)</td>
-                        <td style={{...TD(RED),fontWeight:700}}>{fmtM(st.totGasOp)}</td><td style={TD()}></td>
-                      </tr>
+                      <tr style={{background:MID2}}><td style={TD(MUTED)}>Comisiones s/ventas</td><td style={TD(MUTED)}>Automático ({ventas.length} ventas)</td><td style={TD(GOLD)}>{fmtM(st.comis)}</td><td style={TD()}>{curBadge('USD')}</td><td style={TD(GOLD)}>{fmtM(st.comis)}</td><td style={TD()}></td></tr>
+                      {gastos.map(g=>(<tr key={g.id}><td style={TD(MUTED)}>{g.cat}</td><td style={TD()}>{g.conc}</td><td style={TD(curCol(g.cur))}>{fmtC(g.monto,g.cur)}</td><td style={TD()}>{curBadge(g.cur)}</td><td style={TD(MUTED)}>{fmtM(toUSD(g.monto,g.cur))}</td><td style={TD()}><button onClick={()=>delGasto(g.id)} style={btn("d")}>✕</button></td></tr>))}
+                      <tr style={{background:MID2}}><td colSpan={4} style={{...TD(MUTED),fontWeight:700,textAlign:"right"}}>TOTAL USD</td><td style={{...TD(RED),fontWeight:700}}>{fmtM(st.totGasOp)}</td><td style={TD()}></td></tr>
                     </tbody>
                   </table>
                 </div>
               </div>
             )}
 
+            {/* ─── OTROS ─── */}
             {tab==="otros" && (
               <div>
                 <div style={card}>
                   <div style={{fontSize:13,fontWeight:700,color:ACE,marginBottom:6}}>🔄 Otros Ingresos y Gastos</div>
-                  <div style={{fontSize:11,color:MUTED,marginBottom:12}}>Intereses, multas, venta de activos, pérdidas — en cualquier moneda.</div>
+                  <div style={{fontSize:11,color:MUTED,marginBottom:12}}>Intereses, multas, venta de activos — en cualquier moneda.</div>
                   <div style={row(8)}>
                     <div style={fld(1)}><span style={lbl}>Tipo</span><select style={inp} value={fo.tipo} onChange={e=>setFo(o=>({...o,tipo:e.target.value}))}><option value="ingreso">✅ Otro Ingreso</option><option value="gasto">❌ Otro Gasto</option></select></div>
                     <div style={fld(3)}><span style={lbl}>Concepto</span><input style={inp} value={fo.conc} onChange={e=>setFo(o=>({...o,conc:e.target.value}))} placeholder="Ej: Interés bancario, Multa..."/></div>
@@ -486,72 +684,44 @@
                     <div style={{alignSelf:"flex-end",paddingBottom:1}}><button onClick={addOtro} style={btn()}>+ Agregar</button></div>
                   </div>
                 </div>
-                {otros.length>0 && (
-                  <div style={{...card,padding:0}}>
-                    <table style={{width:"100%",borderCollapse:"collapse"}}>
-                      <thead><tr><th style={TH}>Tipo</th><th style={TH}>Concepto</th><th style={TH}>Monto</th><th style={TH}>Mon.</th><th style={TH}>≈ USD</th><th style={TH}></th></tr></thead>
-                      <tbody>
-                        {otros.map(o=>(
-                          <tr key={o.id}>
-                            <td style={TD(o.tipo==="ingreso"?ACE:RED)}>{o.tipo==="ingreso"?"(+) Ingreso":"(-) Gasto"}</td>
-                            <td style={TD()}>{o.conc}</td>
-                            <td style={TD(curCol(o.cur))}>{o.tipo==="gasto"?"-":""}{fmtC(o.monto,o.cur)}</td>
-                            <td style={TD()}>{curBadge(o.cur)}</td>
-                            <td style={TD(MUTED)}>{fmtM(toUSD(o.monto,o.cur))}</td>
-                            <td style={TD()}><button onClick={()=>delOtro(o.id)} style={btn("d")}>✕</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                {otros.length>0&&(<div style={{...card,padding:0}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr><th style={TH}>Tipo</th><th style={TH}>Concepto</th><th style={TH}>Monto</th><th style={TH}>Mon.</th><th style={TH}>≈ USD</th><th style={TH}></th></tr></thead>
+                  <tbody>{otros.map(o=>(<tr key={o.id}><td style={TD(o.tipo==="ingreso"?ACE:RED)}>{o.tipo==="ingreso"?"(+) Ingreso":"(-) Gasto"}</td><td style={TD()}>{o.conc}</td><td style={TD(curCol(o.cur))}>{o.tipo==="gasto"?"-":""}{fmtC(o.monto,o.cur)}</td><td style={TD()}>{curBadge(o.cur)}</td><td style={TD(MUTED)}>{fmtM(toUSD(o.monto,o.cur))}</td><td style={TD()}><button onClick={()=>delOtro(o.id)} style={btn("d")}>✕</button></td></tr>))}</tbody>
+                </table></div>)}
               </div>
             )}
 
+            {/* ─── ONAT ─── */}
             {tab==="onat" && (
               <div>
                 <div style={{...card,borderTop:"3px solid "+PUR}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
                     <div>
                       <div style={{fontSize:14,fontWeight:700,color:PUR,marginBottom:4}}>🏛 Cálculo ONAT — Agencia Tributaria Cuba</div>
-                      <div style={{fontSize:11,color:MUTED}}>Tasa oficial: <span style={{color:PUR,fontFamily:"monospace",fontWeight:700}}>1 USD = {cfg.CUP_of} CUP</span>{"  ·  "}Tasa informal (referencia): <span style={{color:GOLD,fontFamily:"monospace",fontWeight:700}}>1 USD = {cfg.CUP_inf} CUP</span></div>
+                      <div style={{fontSize:11,color:MUTED}}>Tasa oficial: <span style={{color:PUR,fontFamily:"monospace",fontWeight:700}}>1 USD = {cfg.CUP_of} CUP</span>{"  ·  "}Informal: <span style={{color:GOLD,fontFamily:"monospace",fontWeight:700}}>1 USD = {cfg.CUP_inf} CUP</span></div>
                     </div>
                     <div style={{background:BG,borderRadius:4,padding:"10px 16px",textAlign:"right",border:"1px solid "+PUR+'44'}}>
-                      <div style={{fontSize:10,color:MUTED,textTransform:"uppercase",letterSpacing:"0.06em"}}>Total a Pagar ONAT</div>
+                      <div style={{fontSize:10,color:MUTED}}>Total a Pagar ONAT</div>
                       <div style={{fontSize:22,fontWeight:800,color:PUR,fontFamily:"'Courier New',monospace"}}>{fmtCUP(onat.totalONAT)}</div>
                       <div style={{fontSize:10,color:GOLD,marginTop:2}}>≈ {fmtM(onat.usd_inf)} USD (informal)</div>
                     </div>
                   </div>
                 </div>
-
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
                   <div style={{...card,borderTop:"2px solid "+GOLD}}>
                     <div style={{fontSize:12,fontWeight:700,color:GOLD,marginBottom:12}}>1. Impuesto sobre las Ventas — 11%</div>
-                    {[
-                      {lbl:"Ventas totales del período",val:fmtM(st.vBruta),col:ACE},
-                      {lbl:"× Tasa oficial ("+cfg.CUP_of+" CUP/USD) →",val:fmtCUP(onat.ventasCUP),col:PUR},
-                    ].map((r,i)=>(
-                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #223d25"}}>
-                        <span style={{fontSize:11,color:MUTED}}>{r.lbl}</span>
-                        <span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span>
-                      </div>
+                    {[{lbl:"Ventas totales (USD)",val:fmtM(st.vBruta),col:ACE},{lbl:"× Tasa oficial → CUP",val:fmtCUP(onat.ventasCUP),col:PUR}].map((r,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #223d25"}}><span style={{fontSize:11,color:MUTED}}>{r.lbl}</span><span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span></div>
                     ))}
                     <div style={{display:"flex",justifyContent:"space-between",padding:"12px 10px",background:MID2,borderRadius:4,marginTop:8}}>
                       <span style={{fontSize:13,fontWeight:700,color:LIGHT}}>= 11% Impuesto s/ Ventas</span>
                       <span style={{fontFamily:"monospace",fontWeight:800,fontSize:16,color:GOLD}}>{fmtCUP(onat.impVentas)}</span>
                     </div>
                   </div>
-
                   <div style={{...card,borderTop:"2px solid "+ACE}}>
                     <div style={{fontSize:12,fontWeight:700,color:ACE,marginBottom:12}}>2. Impuesto sobre los Ingresos — 35%</div>
-                    {[
-                      {lbl:"Utilidad antes de impuestos",val:fmtM(st.uAnte),col:num(st.uAnte)>=0?ACE:RED},
-                      {lbl:"× Tasa oficial ("+cfg.CUP_of+" CUP/USD) →",val:fmtCUP(onat.utilCUP),col:PUR},
-                    ].map((r,i)=>(
-                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #223d25"}}>
-                        <span style={{fontSize:11,color:MUTED}}>{r.lbl}</span>
-                        <span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span>
-                      </div>
+                    {[{lbl:"Utilidad antes de imp. (USD)",val:fmtM(st.uAnte),col:num(st.uAnte)>=0?ACE:RED},{lbl:"× Tasa oficial → CUP",val:fmtCUP(onat.utilCUP),col:PUR}].map((r,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #223d25"}}><span style={{fontSize:11,color:MUTED}}>{r.lbl}</span><span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span></div>
                     ))}
                     <div style={{display:"flex",justifyContent:"space-between",padding:"12px 10px",background:MID2,borderRadius:4,marginTop:8}}>
                       <span style={{fontSize:13,fontWeight:700,color:LIGHT}}>= 35% Impuesto s/ Ingresos</span>
@@ -560,41 +730,20 @@
                     {num(st.uAnte)<=0&&<div style={{fontSize:10,color:MUTED,fontStyle:"italic",marginTop:6}}>* No aplica — utilidad negativa o cero</div>}
                   </div>
                 </div>
-
                 <div style={{...card,background:"#120d1e",border:"2px solid "+PUR}}>
-                  <div style={{fontSize:13,fontWeight:700,color:PUR,marginBottom:14}}>📋 Resumen Total ONAT</div>
-                  {[
-                    {lbl:"Impuesto s/ Ventas (11%)",val:fmtCUP(onat.impVentas),col:GOLD},
-                    {lbl:"Impuesto s/ Ingresos (35%)",val:fmtCUP(onat.impIngresos),col:ACE},
-                  ].map((r,i)=>(
-                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #2a1a40"}}>
-                      <span style={{color:MUTED}}>{r.lbl}</span>
-                      <span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span>
-                    </div>
-                  ))}
-                  <div style={{display:"flex",justifyContent:"space-between",padding:"14px 0 8px"}}>
-                    <span style={{fontSize:16,fontWeight:800,color:PUR}}>TOTAL A PAGAR</span>
-                    <span style={{fontFamily:"monospace",fontWeight:800,fontSize:22,color:PUR}}>{fmtCUP(onat.totalONAT)}</span>
+                  <div style={{fontSize:13,fontWeight:700,color:PUR,marginBottom:14}}>📋 Total ONAT a Pagar</div>
+                  {[{lbl:"Impuesto s/ Ventas (11%)",val:fmtCUP(onat.impVentas),col:GOLD},{lbl:"Impuesto s/ Ingresos (35%)",val:fmtCUP(onat.impIngresos),col:ACE}].map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #2a1a40"}}><span style={{color:MUTED}}>{r.lbl}</span><span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span></div>))}
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"14px 0 8px"}}><span style={{fontSize:16,fontWeight:800,color:PUR}}>TOTAL A PAGAR</span><span style={{fontFamily:"monospace",fontWeight:800,fontSize:22,color:PUR}}>{fmtCUP(onat.totalONAT)}</span></div>
+                  <div style={{display:"flex",gap:12,flexWrap:"wrap",padding:"12px 0",borderTop:"1px solid #2a1a40"}}>
+                    <div style={{flex:1,background:BG,borderRadius:4,padding:"10px 12px"}}><div style={{fontSize:10,color:MUTED,marginBottom:2}}>USD (tasa oficial)</div><div style={{fontFamily:"monospace",color:MUTED,fontSize:13}}>{fmtM(onat.usd_of)}</div></div>
+                    <div style={{flex:1,background:BG,borderRadius:4,padding:"10px 12px",border:"1px solid "+GOLD+'44'}}><div style={{fontSize:10,color:MUTED,marginBottom:2}}>USD (tasa informal / real)</div><div style={{fontFamily:"monospace",color:GOLD,fontSize:13,fontWeight:700}}>{fmtM(onat.usd_inf)}</div></div>
                   </div>
-                  <div style={{display:"flex",gap:16,flexWrap:"wrap",padding:"12px 0",borderTop:"1px solid #2a1a40"}}>
-                    <div style={{flex:1,background:BG,borderRadius:4,padding:"10px 12px"}}>
-                      <div style={{fontSize:10,color:MUTED,marginBottom:2}}>Equivalente USD (tasa oficial)</div>
-                      <div style={{fontFamily:"monospace",color:MUTED,fontSize:13}}>{fmtM(onat.usd_of)}</div>
-                      <div style={{fontSize:10,color:MUTED,marginTop:1}}>A {cfg.CUP_of} CUP/USD</div>
-                    </div>
-                    <div style={{flex:1,background:BG,borderRadius:4,padding:"10px 12px",border:"1px solid "+GOLD+'44'}}>
-                      <div style={{fontSize:10,color:MUTED,marginBottom:2}}>Equivalente USD (tasa informal / real)</div>
-                      <div style={{fontFamily:"monospace",color:GOLD,fontSize:13,fontWeight:700}}>{fmtM(onat.usd_inf)}</div>
-                      <div style={{fontSize:10,color:MUTED,marginTop:1}}>A {cfg.CUP_inf} CUP/USD</div>
-                    </div>
-                  </div>
-                  <div style={{marginTop:10,padding:"8px 12px",background:BG,borderRadius:4,fontSize:10,color:"#9b7ac4",lineHeight:1.7}}>
-                    ⚠ Cálculos orientativos basados en 11% s/ventas y 35% s/ingresos a tasa oficial. Pueden aplicar deducciones, escalas progresivas u otros conceptos según tu régimen. Confirmar con tu gestor de la ONAT.
-                  </div>
+                  <div style={{marginTop:10,padding:"8px 12px",background:BG,borderRadius:4,fontSize:10,color:"#9b7ac4",lineHeight:1.7}}>⚠ Cálculos orientativos. Confirmar con tu gestor de la ONAT.</div>
                 </div>
               </div>
             )}
 
+            {/* ─── RESULTADOS ─── */}
             {tab==="resultados" && (
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,alignItems:"start"}}>
                 <div style={{...card,padding:0,overflow:"hidden"}}>
@@ -607,10 +756,7 @@
                     <div style={{padding:"4px 16px 6px",fontSize:9,color:MUTED,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700}}>Ingresos</div>
                     <SRow label="Ventas Brutas" val={st.vBruta} bold={true}/>
                     <div style={{padding:"10px 16px 4px",fontSize:9,color:MUTED,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700}}>Costo de Ventas</div>
-                    <SRow label="Inventario Inicial" val={cfg.invIni} indent={1}/>
-                    <SRow label="(+) Compras del Período" val={st.totComp} indent={1}/>
-                    <SRow label="(-) Inventario Final" val={-num(st.invFin)} indent={1}/>
-                    <SRow label="= Costo de Ventas" val={-st.cVentas} bold={true}/>
+                    <SRow label="Inventario Inicial" val={cfg.invIni} indent={1}/><SRow label="(+) Compras del Período" val={st.totComp} indent={1}/><SRow label="(-) Inventario Final" val={-num(st.invFin)} indent={1}/><SRow label="= Costo de Ventas" val={-st.cVentas} bold={true}/>
                     <div style={{height:1,background:"#223d25",margin:"8px 0"}}/>
                     <SRow label="UTILIDAD BRUTA" val={st.uBruta} big={true}/>
                     <div style={{fontSize:10,color:MUTED,textAlign:"right",paddingRight:16,paddingBottom:6,fontFamily:"monospace"}}>Margen bruto: {(st.mbr*100).toFixed(1)}%</div>
@@ -621,19 +767,10 @@
                     <div style={{height:1,background:"#223d25",margin:"8px 0"}}/>
                     <SRow label="UTILIDAD DE OPERACIÓN" val={st.uOper} big={true}/>
                     <div style={{fontSize:10,color:MUTED,textAlign:"right",paddingRight:16,paddingBottom:6,fontFamily:"monospace"}}>Margen operativo: {st.vBruta>0?(st.uOper/st.vBruta*100).toFixed(1):0}%</div>
-                    {otros.length>0 && (
-                      <div>
-                        <div style={{padding:"6px 16px 4px",fontSize:9,color:MUTED,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700}}>Otros Ingresos y Gastos</div>
-                        {otros.filter(o=>o.tipo==="ingreso").map(o=><SRow key={o.id} label={"(+) "+o.conc+" ("+o.cur+")"} val={toUSD(o.monto,o.cur)} indent={1}/>)}
-                        {otros.filter(o=>o.tipo==="gasto").map(o=><SRow key={o.id} label={"(-) "+o.conc+" ("+o.cur+")"} val={-toUSD(o.monto,o.cur)} indent={1}/>)}
-                        <SRow label="= Neto Otros" val={st.oIng-st.oGas} bold={true}/>
-                        <div style={{height:1,background:"#223d25",margin:"8px 0"}}/>
-                      </div>
-                    )}
+                    {otros.length>0&&(<div><div style={{padding:"6px 16px 4px",fontSize:9,color:MUTED,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700}}>Otros Ingresos y Gastos</div>{otros.filter(o=>o.tipo==="ingreso").map(o=><SRow key={o.id} label={"(+) "+o.conc+" ("+o.cur+")"} val={toUSD(o.monto,o.cur)} indent={1}/>)}{otros.filter(o=>o.tipo==="gasto").map(o=><SRow key={o.id} label={"(-) "+o.conc+" ("+o.cur+")"} val={-toUSD(o.monto,o.cur)} indent={1}/>)}<SRow label="= Neto Otros" val={st.oIng-st.oGas} bold={true}/><div style={{height:1,background:"#223d25",margin:"8px 0"}}/></div>)}
                     <SRow label="UTILIDAD ANTES DE IMPUESTOS" val={st.uAnte} big={true}/>
-                    <div style={{padding:"6px 16px 4px",fontSize:9,color:PUR,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700}}>ONAT (ver pestaña ONAT)</div>
+                    <div style={{padding:"6px 16px 4px",fontSize:9,color:PUR,textTransform:"uppercase",letterSpacing:"0.1em",fontWeight:700}}>ONAT</div>
                     <SRow label={"(-) ONAT estimado (equiv. USD informal)"} val={-onat.usd_inf} indent={1}/>
-                    {num(imp.isr)>0&&<SRow label="(-) ISR / Otros impuestos" val={-toUSD(imp.isr,imp.curIsr)} indent={1}/>}
                     <div style={{height:1,background:"#223d25",margin:"8px 0"}}/>
                     <div style={{padding:"4px 0 14px"}}>
                       <SRow label="UTILIDAD NETA" val={st.uNeta} big={true}/>
@@ -641,52 +778,24 @@
                     </div>
                   </div>
                 </div>
-
                 <div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
-                    {[
-                      {label:"Ventas (USD)",val:fmtM(st.vBruta),color:ACE},
-                      {label:"Margen Bruto",val:(st.mbr*100).toFixed(1)+"%",color:st.mbr>=0.2?ACE:st.mbr>=0?GOLD:RED},
-                      {label:"Utilidad Neta (USD)",val:fmtM(st.uNeta),color:num(st.uNeta)>=0?ACE:RED},
-                      {label:"Margen Neto",val:(st.mnr*100).toFixed(1)+"%",color:st.mnr>=0.08?ACE:st.mnr>=0?GOLD:RED},
-                      {label:"ONAT a pagar (CUP)",val:fmtCUP(onat.totalONAT),color:PUR},
-                      {label:"ONAT equiv. USD informal",val:fmtM(onat.usd_inf),color:PUR},
-                      {label:"Comisiones Vendedores",val:fmtM(st.comis),color:GOLD},
-                      {label:"COGS (USD)",val:fmtM(st.cVentas),color:MUTED},
-                    ].map(k=>(
-                      <div key={k.label} style={{background:MID,borderRadius:4,padding:"11px 13px"}}>
-                        <div style={{fontSize:9,color:MUTED,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4,fontWeight:700}}>{k.label}</div>
-                        <div style={{fontSize:14,fontWeight:800,color:k.color,fontFamily:"'Courier New',monospace"}}>{k.val}</div>
-                      </div>
+                    {[{label:"Ventas (USD)",val:fmtM(st.vBruta),color:ACE},{label:"Margen Bruto",val:(st.mbr*100).toFixed(1)+"%",color:st.mbr>=0.2?ACE:st.mbr>=0?GOLD:RED},{label:"Utilidad Neta",val:fmtM(st.uNeta),color:num(st.uNeta)>=0?ACE:RED},{label:"Margen Neto",val:(st.mnr*100).toFixed(1)+"%",color:st.mnr>=0.08?ACE:st.mnr>=0?GOLD:RED},{label:"ONAT (CUP)",val:fmtCUP(onat.totalONAT),color:PUR},{label:"ONAT (USD inf.)",val:fmtM(onat.usd_inf),color:PUR},{label:"Comisiones",val:fmtM(st.comis),color:GOLD},{label:"COGS",val:fmtM(st.cVentas),color:MUTED}].map(k=>(
+                      <div key={k.label} style={{background:MID,borderRadius:4,padding:"11px 13px"}}><div style={{fontSize:9,color:MUTED,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4,fontWeight:700}}>{k.label}</div><div style={{fontSize:14,fontWeight:800,color:k.color,fontFamily:"'Courier New',monospace"}}>{k.val}</div></div>
                     ))}
                   </div>
-
                   <div style={{...card,background:MID2,marginBottom:14}}>
-                    <div style={{fontSize:10,fontWeight:700,color:MUTED,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.06em"}}>Tasas de Cambio Activas</div>
+                    <div style={{fontSize:10,fontWeight:700,color:MUTED,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.06em"}}>Tasas Activas</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                       {[{lbl:"CUP OFICIAL",val:"1 USD = "+cfg.CUP_of+" CUP",col:PUR},{lbl:"CUP INFORMAL",val:"1 USD = "+cfg.CUP_inf+" CUP",col:GOLD},{lbl:"EUR/USD",val:"1 EUR = "+cfg.EUR_usd+" USD",col:BLUE}].map(r=>(
-                        <div key={r.lbl} style={{background:BG,borderRadius:4,padding:"8px 12px",flex:1}}>
-                          <div style={{fontSize:9,color:MUTED,marginBottom:2}}>{r.lbl}</div>
-                          <div style={{fontFamily:"monospace",color:r.col,fontWeight:700,fontSize:12}}>{r.val}</div>
-                        </div>
+                        <div key={r.lbl} style={{background:BG,borderRadius:4,padding:"8px 12px",flex:1}}><div style={{fontSize:9,color:MUTED,marginBottom:2}}>{r.lbl}</div><div style={{fontFamily:"monospace",color:r.col,fontWeight:700,fontSize:12}}>{r.val}</div></div>
                       ))}
                     </div>
                   </div>
-
-                  {ventas.length>0&&(()=>{
-                    const bV={};ventas.forEach(v=>{const t=v.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0);const k=v.vend||"Sin nombre";if(!bV[k])bV[k]={v:0,c:0};bV[k].v+=t;bV[k].c+=t*num(v.com)/100;});
-                    return(<div style={{...card,padding:0,overflow:"hidden",marginBottom:14}}>
-                      <div style={{background:MID2,padding:"10px 14px",fontSize:10,color:GOLD,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em"}}>Comisiones por Vendedor</div>
-                      <table style={{width:"100%",borderCollapse:"collapse"}}>
-                        <thead><tr><th style={TH}>Vendedor</th><th style={TH}>Ventas USD</th><th style={TH}>Comisión USD</th></tr></thead>
-                        <tbody>{Object.entries(bV).map(([vend,d])=><tr key={vend}><td style={TD()}>{vend}</td><td style={TD(ACE)}>{fmtM(d.v)}</td><td style={TD(GOLD)}>{fmtM(d.c)}</td></tr>)}</tbody>
-                      </table>
-                    </div>);
-                  })()}
-
+                  {ventas.length>0&&(()=>{const bV={};ventas.forEach(v=>{const t=v.items.reduce((s,i)=>s+num(i.qty)*toUSD(i.punit,i.cur),0);const k=v.vend||"Sin nombre";if(!bV[k])bV[k]={v:0,c:0};bV[k].v+=t;bV[k].c+=t*num(v.com)/100;});return(<div style={{...card,padding:0,overflow:"hidden",marginBottom:14}}><div style={{background:MID2,padding:"10px 14px",fontSize:10,color:GOLD,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em"}}>Comisiones por Vendedor</div><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={TH}>Vendedor</th><th style={TH}>Ventas USD</th><th style={TH}>Comisión USD</th></tr></thead><tbody>{Object.entries(bV).map(([vend,d])=><tr key={vend}><td style={TD()}>{vend}</td><td style={TD(ACE)}>{fmtM(d.v)}</td><td style={TD(GOLD)}>{fmtM(d.c)}</td></tr>)}</tbody></table></div>);})()}
                   <div style={{textAlign:"center"}}>
                     <button onClick={exportXL} style={{...btn("g"),padding:"11px 28px",fontSize:13}}>⬇ Exportar a Excel</button>
-                    <div style={{fontSize:10,color:MUTED,marginTop:6,lineHeight:1.6}}>6 hojas: Estado de Resultados · ONAT · Ventas · Compras · Gastos · Comisiones</div>
+                    <div style={{fontSize:10,color:MUTED,marginTop:6,lineHeight:1.6}}>6 hojas: ER · ONAT · Ventas · Compras · Gastos · Comisiones</div>
                   </div>
                 </div>
               </div>
