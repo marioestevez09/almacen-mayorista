@@ -530,13 +530,25 @@
         </div>);
       };
 
-      const unlock = () => { if(pinInput===appPin){sessionStorage.setItem('app_unlocked','1');setIsUnlocked(true);setPinError('');}else{setPinError('PIN incorrecto. Inténtalo de nuevo.');} };
-      const savePin = () => {
-        if(!newPin1){localStorage.removeItem('app_pin');setAppPin('');setPinMsg('Contraseña eliminada.');setNewPin1('');setNewPin2('');return;}
-        if(newPin1.length<4){setPinMsg('Mínimo 4 caracteres.');return;}
+      const hashPin = async (pin) => {
+        try {
+          const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin.trim()));
+          return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+        } catch(e) { return btoa(unescape(encodeURIComponent(pin.trim()))); }
+      };
+      const unlock = async () => {
+        if(!pinInput.trim()){setPinError('Escribe tu contraseña.');return;}
+        const h = await hashPin(pinInput);
+        if(h===appPin){sessionStorage.setItem('app_unlocked','1');setIsUnlocked(true);setPinError('');}
+        else{setPinError('Contraseña incorrecta. Inténtalo de nuevo.');}
+      };
+      const savePin = async () => {
+        if(!newPin1.trim()){localStorage.removeItem('app_pin');setAppPin('');sessionStorage.removeItem('app_unlocked');setPinMsg('Contraseña eliminada. La app quedará sin protección.');setNewPin1('');setNewPin2('');return;}
+        if(newPin1.trim().length<4){setPinMsg('Mínimo 4 caracteres.');return;}
         if(newPin1!==newPin2){setPinMsg('Las contraseñas no coinciden.');return;}
-        localStorage.setItem('app_pin',newPin1);setAppPin(newPin1);sessionStorage.setItem('app_unlocked','1');
-        setPinMsg('✓ Contraseña guardada correctamente.');setNewPin1('');setNewPin2('');
+        const h = await hashPin(newPin1);
+        localStorage.setItem('app_pin',h);setAppPin(h);sessionStorage.setItem('app_unlocked','1');
+        setPinMsg('✓ Contraseña guardada. Estará activa en la próxima sesión.');setNewPin1('');setNewPin2('');
       };
 
       if(appPin && !isUnlocked) return (
@@ -545,11 +557,11 @@
             <div style={{fontSize:36,marginBottom:12}}>🔒</div>
             <div style={{fontSize:18,fontWeight:800,color:ACE,marginBottom:4}}>Almacén Mayorista</div>
             <div style={{fontSize:12,color:MUTED,marginBottom:24}}>Ingresa tu contraseña para acceder</div>
-            <input style={{...inp,textAlign:"center",fontSize:20,letterSpacing:"0.3em",marginBottom:12}} type="password"
+            <input style={{...INP,textAlign:"center",fontSize:20,letterSpacing:"0.3em",marginBottom:12,borderRadius:4}} type="password"
               value={pinInput} onChange={e=>setPinInput(e.target.value)}
               onKeyDown={e=>e.key==='Enter'&&unlock()} placeholder="••••" autoFocus/>
-            {pinError && <div style={{fontSize:11,color:RED,marginBottom:10}}>{pinError}</div>}
-            <button onClick={unlock} style={{...btn(),width:"100%",padding:"12px",fontSize:13}}>Entrar</button>
+            {pinError && <div style={{fontSize:11,color:"#e05252",marginBottom:10}}>{pinError}</div>}
+            <button onClick={unlock} style={{background:ACE,color:"#0d1b0e",border:"none",borderRadius:4,cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",padding:"12px",width:"100%"}}>Entrar</button>
           </div>
         </div>
       );
