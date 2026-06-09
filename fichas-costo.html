@@ -154,8 +154,7 @@ const TERMINOS=[{k:"CIF",l:"CIF — Costo, Seguro y Flete"},{k:"CFR",l:"CFR — 
 const TBADGE={CIF:"b-cif",CFR:"b-cfr",FOB:"b-fob",NAC:"b-nac",PROD:"b-prod",OTRA:"b-otra"};
 const MONEDAS=["USD","CUP","EUR"];
 const emptyGasto=()=>({id:uid(),concepto:"",monto:"",moneda:"USD"});
-const emptyProd=()=>({id:uid(),nombre:"",codigo:"",precioFactura:"",monedaPrecio:"USD",tipoPrecio:"total",niveles:[],
-  gastosOnat:[],pvOnat:"",monedaPvOnat:"CUP",pvReal:"",monedaPvReal:"USD",notas:""});
+const emptyProd=()=>({id:uid(),nombre:"",codigo:"",precioFactura:"",monedaPrecio:"USD",tipoPrecio:"total",niveles:[],gastos:[],pvOnat:"",monedaPvOnat:"CUP",pvReal:"",monedaPvReal:"USD",notas:""});
 const defCont=()=>({id:uid(),codigo:"",nombre:"",termino:"CIF",proveedor:"",pais:"",fecha:today(),notas:"",
   flete:"",monedaFlete:"USD",thcd:"",monedaThcd:"USD",seguroTipo:"pct",seguroValor:"",monedaSeguro:"USD",
   gastos:[],productos:[]});
@@ -208,10 +207,7 @@ function calcContenedor(c,rates){
   const cifUSD=valorMercUSD+fleteUSD+thcdUSD+seguroUSD;
   const gastosUSD=(c.gastos||[]).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
   const costoTotalUSD=cifUSD+gastosUSD;
-  // CUP ONAT equivalentes
-  const cifCUPonat=(valorMercUSD+fleteUSD+thcdUSD+seguroUSD)*rates.onat;
-  const gastosCUPonat=gastosUSD*rates.onat;
-  return {valorMercUSD,fleteUSD,thcdUSD,seguroUSD,cifUSD,gastosUSD,costoTotalUSD,cifCUPonat,gastosCUPonat};
+  return {valorMercUSD,fleteUSD,thcdUSD,seguroUSD,cifUSD,gastosUSD,costoTotalUSD};
 }
 
 function calcProducto(p,c,rates,calcCont){
@@ -226,12 +222,7 @@ function calcProducto(p,c,rates,calcCont){
   const thcdR=calcCont.thcdUSD*prop;
   const seguroR=calcCont.seguroUSD*prop;
 
-  // Importadora: entra en AMBAS fichas (USD a tasa mercado)
-  const importadoraUSD=(p.gastos||[])
-    .filter(g=>g.concepto&&(g.concepto.toLowerCase().includes("importadora")))
-    .reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
-
-  // Gastos adicionales filtrados por ficha
+  // Gastos filtrados por ficha (enOnat / enReal)
   const gastosRealUSD=(p.gastos||[]).filter(g=>g.enReal).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
   const gastosOnatUSD=(p.gastos||[]).filter(g=>g.enOnat).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
   // Gastos lote real (distribuidos)
@@ -267,21 +258,6 @@ function calcNiveles(niveles,costoUnitBase){
   });
 }
 
-function calcOnat(nivelesCalc,pvOnatCUP,costoOnatUnitCUP,costoRealUnitUSD,pvRealUSD,cantBase,rates){
-  return nivelesCalc.map(n=>{
-    const pvoN=pvOnatCUP*n.unidadesBase;
-    const costoN=costoOnatUnitCUP*n.unidadesBase;
-    const imp11=pvoN*0.11;
-    const utilN=pvoN-costoN;
-    const imp35=utilN>0?utilN*0.35:0;
-    const totalImpCUP=imp11+imp35;
-    const totalImpUSD=cupOnatToUSD(totalImpCUP,rates);
-    const costoRealN=costoRealUnitUSD*n.unidadesBase;
-    const pvRN=pvRealUSD*n.unidadesBase;
-    const margenRealUSD=pvRN-costoRealN-totalImpUSD;
-    return {...n,pvoN,costoN,imp11,utilN,imp35,totalImpCUP,totalImpUSD,costoRealN,pvRN,margenRealUSD};
-  });
-}
 
 // ── PIN ──
 function PinScreen({onUnlock,storedHash}){
