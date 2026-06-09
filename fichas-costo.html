@@ -154,6 +154,7 @@ const TERMINOS=[{k:"CIF",l:"CIF — Costo, Seguro y Flete"},{k:"CFR",l:"CFR — 
 const TBADGE={CIF:"b-cif",CFR:"b-cfr",FOB:"b-fob",NAC:"b-nac",PROD:"b-prod",OTRA:"b-otra"};
 const MONEDAS=["USD","CUP","EUR"];
 const emptyGasto=()=>({id:uid(),concepto:"",monto:"",moneda:"USD"});
+const emptyGastoP=()=>({id:uid(),concepto:"",monto:"",moneda:"USD",enOnat:true,enReal:true});
 const emptyProd=()=>({id:uid(),nombre:"",codigo:"",precioFactura:"",monedaPrecio:"USD",tipoPrecio:"total",niveles:[],gastos:[],pvOnat:"",monedaPvOnat:"CUP",pvReal:"",monedaPvReal:"USD",notas:""});
 const defCont=()=>({id:uid(),codigo:"",nombre:"",termino:"CIF",proveedor:"",pais:"",fecha:today(),notas:"",
   flete:"",monedaFlete:"USD",thcd:"",monedaThcd:"USD",seguroTipo:"pct",seguroValor:"",monedaSeguro:"USD",
