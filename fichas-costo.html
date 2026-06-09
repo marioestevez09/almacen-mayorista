@@ -220,25 +220,42 @@ function calcProducto(p,c,rates,calcCont){
   if(p.tipoPrecio==="unit")precioMercUSD*=cantBase;
   const prop=calcCont.valorMercUSD>0?precioMercUSD/calcCont.valorMercUSD:0;
 
-  // ── FICHA REAL (todo en USD con tasa mercado) ──
+  // CIF proporcional (compartido)
+  const cifPropUSD=(calcCont.fleteUSD+calcCont.thcdUSD+calcCont.seguroUSD)*prop;
   const fleteR=calcCont.fleteUSD*prop;
   const thcdR=calcCont.thcdUSD*prop;
   const seguroR=calcCont.seguroUSD*prop;
-  const gastosR=calcCont.gastosUSD*prop;
-  const costoRealTotalUSD=precioMercUSD+fleteR+thcdR+seguroR+gastosR;
+
+  // Importadora: entra en AMBAS fichas (USD a tasa mercado)
+  const importadoraUSD=(p.gastos||[])
+    .filter(g=>g.concepto&&(g.concepto.toLowerCase().includes("importadora")))
+    .reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
+
+  // Gastos adicionales filtrados por ficha
+  const gastosRealUSD=(p.gastos||[]).filter(g=>g.enReal).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
+  const gastosOnatUSD=(p.gastos||[]).filter(g=>g.enOnat).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
+  // Gastos lote real (distribuidos)
+  const gastosLoteR=calcCont.gastosUSD*prop;
+
+  // ── BASE COMPARTIDA: CIF + importadora ──
+  // Importadora ya está en gastos del producto filtrada arriba como enOnat+enReal
+  // Base = mercancía + CIF proporcional
+  const baseUSD=precioMercUSD+cifPropUSD;
+
+  // ── FICHA REAL: base + gastos marcados enReal + gastos lote ──
+  const costoRealTotalUSD=baseUSD+gastosRealUSD+gastosLoteR;
   const costoRealUnitUSD=cantBase>0?costoRealTotalUSD/cantBase:0;
 
-  // ── FICHA ONAT (CIF en CUP×tasa ONAT + gastos ONAT propios del producto) ──
-  // CIF proporcional en CUP a tasa ONAT
-  const cifOnatCUP=(precioMercUSD+fleteR+thcdR+seguroR)*rates.onat;
-  // Gastos ONAT propios del producto (importadora USD×onat, importadora CUP directo, transporte)
-  const gastosOnatCUP=(p.gastosOnat||[]).reduce((s,g)=>s+toCUPonat(g.monto,g.moneda,rates),0);
-  const costoOnatTotalCUP=cifOnatCUP+gastosOnatCUP;
-  const costoOnatUnitCUP=cantBase>0?costoOnatTotalCUP/cantBase:0;
+  // ── FICHA ONAT: base + gastos marcados enOnat → en USD → × tasa ONAT = CUP ──
+  const costoOnatTotalUSD=baseUSD+gastosOnatUSD;
+  const costoOnatUnitUSD=cantBase>0?costoOnatTotalUSD/cantBase:0;
+  const costoOnatUnitCUP=costoOnatUnitUSD*rates.onat;
+  const costoOnatTotalCUP=costoOnatTotalUSD*rates.onat;
 
-  return {cantBase,prop,precioMercUSD,fleteR,thcdR,seguroR,gastosR,
+  return {cantBase,prop,precioMercUSD,fleteR,thcdR,seguroR,
+    baseUSD,gastosRealUSD,gastosOnatUSD,gastosLoteR,
     costoRealTotalUSD,costoRealUnitUSD,
-    cifOnatCUP,gastosOnatCUP,costoOnatTotalCUP,costoOnatUnitCUP};
+    costoOnatTotalUSD,costoOnatUnitUSD,costoOnatUnitCUP,costoOnatTotalCUP};
 }
 
 function calcNiveles(niveles,costoUnitBase){
@@ -305,9 +322,9 @@ function ContenedorModal({inicial,rates,onSave,onClose}){
   const addN=pid=>upd("productos",c.productos.map(p=>{if(p.id!==pid)return p;const idx=(p.niveles||[]).length;return {...p,niveles:[...(p.niveles||[]),{id:uid(),nombre:"",unidad:"",total:"",porNivelAnterior:""}]};}));
   const delN=(pid,nid)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,niveles:p.niveles.filter(n=>n.id!==nid)}:p));
   const updN=(pid,nid,k,v)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,niveles:p.niveles.map(n=>n.id===nid?{...n,[k]:v}:n)}:p));
-  const addGO=pid=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastosOnat:[...(p.gastosOnat||[]),emptyGasto()]}:p));
-  const updGO=(pid,id,k,v)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastosOnat:(p.gastosOnat||[]).map(g=>g.id===id?{...g,[k]:v}:g)}:p));
-  const delGO=(pid,id)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastosOnat:(p.gastosOnat||[]).filter(g=>g.id!==id)}:p));
+  const addGP=pid=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastos:[...(p.gastos||[]),emptyGastoP()]}:p));
+  const updGP=(pid,id,k,v)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastos:(p.gastos||[]).map(g=>g.id===id?{...g,[k]:v}:g)}:p));
+  const delGP=(pid,id)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastos:(p.gastos||[]).filter(g=>g.id!==id)}:p));
 
   const calcCont=calcContenedor(c,rates);
   const esCIF=["CIF","CFR","FOB"].includes(c.termino);
@@ -411,25 +428,54 @@ function ContenedorModal({inicial,rates,onSave,onClose}){
             {(p.niveles||[]).length>0&&<button className="btn bs bsm" onClick={()=>addN(p.id)}>+ Nivel superior</button>}
           </div>
 
-          <div style={{fontSize:11,fontWeight:700,color:"var(--cup)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>
-            Gastos ONAT del producto
-            <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0,marginLeft:8}}>(lo que ve la ONAT — USD×tasa ONAT, CUP directo)</span>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--ac2)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>
+            Gastos del producto
+            <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0,marginLeft:8}}>— marca si va en ficha ONAT, Real o ambas</span>
           </div>
-          <div className="alert ai" style={{marginBottom:8,borderColor:"rgba(167,139,250,.3)",color:"var(--cup)",background:"rgba(167,139,250,.05)"}}>
-            Agrega aquí: Gastos importadora USD, Gastos importadora CUP, Transporte (si aplica). Estos se usan solo en la ficha ONAT.
+          <div className="alert ai" style={{marginBottom:8}}>
+            Importadora USD/CUP: marca ambas. Transporte, estibadores: marca según corresponda.
           </div>
-          {(p.gastosOnat||[]).map((g,gi)=>(
-            <div key={g.id} style={{display:"grid",gridTemplateColumns:"1fr 150px 85px 32px",gap:8,marginBottom:8,alignItems:"end"}}>
-              <div className="fgrp">{gi===0&&<label className="flbl">Concepto ONAT</label>}<input className="finp" value={g.concepto} onChange={e=>updGO(p.id,g.id,"concepto",e.target.value)} placeholder="Gastos importadora USD, CUP, Transporte..."/></div>
-              <div className="fgrp">{gi===0&&<label className="flbl">Monto</label>}<input className="finp mono" type="number" step="0.01" min="0" value={g.monto} onChange={e=>updGO(p.id,g.id,"monto",e.target.value)} placeholder="0.00"/></div>
-              <div className="fgrp">{gi===0&&<label className="flbl">Moneda</label>}<MSel value={g.moneda} onChange={v=>updGO(p.id,g.id,"moneda",v)}/></div>
-              <button className="btn bd2 bsm" style={{marginTop:gi===0?20:0}} onClick={()=>delGO(p.id,g.id)}>✕</button>
+          {(p.gastos||[]).length>0&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 130px 78px 60px 60px 28px",gap:6,marginBottom:6,alignItems:"center"}}>
+              <span className="flbl">Concepto</span>
+              <span className="flbl">Monto</span>
+              <span className="flbl">Moneda</span>
+              <span className="flbl" style={{color:"var(--cup)",textAlign:"center"}}>ONAT</span>
+              <span className="flbl" style={{color:"var(--ac)",textAlign:"center"}}>Real</span>
+              <span/>
+            </div>
+          )}
+          {(p.gastos||[]).map((g,gi)=>(
+            <div key={g.id} style={{display:"grid",gridTemplateColumns:"1fr 130px 78px 60px 60px 28px",gap:6,marginBottom:6,alignItems:"center"}}>
+              <input className="finp" value={g.concepto} onChange={e=>updGP(p.id,g.id,"concepto",e.target.value)} placeholder="Gastos importadora USD, Transporte..."/>
+              <input className="finp mono" type="number" step="0.01" min="0" value={g.monto} onChange={e=>updGP(p.id,g.id,"monto",e.target.value)} placeholder="0.00"/>
+              <MSel value={g.moneda} onChange={v=>updGP(p.id,g.id,"moneda",v)}/>
+              <div style={{display:"flex",justifyContent:"center",alignItems:"center"}}>
+                <input type="checkbox" checked={!!g.enOnat} onChange={e=>updGP(p.id,g.id,"enOnat",e.target.checked)}
+                  style={{width:16,height:16,accentColor:"var(--cup)",cursor:"pointer"}}/>
+              </div>
+              <div style={{display:"flex",justifyContent:"center",alignItems:"center"}}>
+                <input type="checkbox" checked={!!g.enReal} onChange={e=>updGP(p.id,g.id,"enReal",e.target.checked)}
+                  style={{width:16,height:16,accentColor:"var(--ac)",cursor:"pointer"}}/>
+              </div>
+              <button className="btn bd2 bsm" style={{padding:"3px 6px"}} onClick={()=>delGP(p.id,g.id)}>✕</button>
             </div>
           ))}
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-            <button className="btn bs bsm" onClick={()=>addGO(p.id)}>+ Gasto ONAT</button>
-            {["Gastos importadora USD","Gastos importadora CUP","Transporte ONAT"].map(t=>(
-              <button key={t} className="btn bs bsm" style={{borderColor:"rgba(167,139,250,.3)",color:"var(--cup)"}} onClick={()=>upd("productos",c.productos.map(pr=>pr.id===p.id?{...pr,gastosOnat:[...(pr.gastosOnat||[]),{...emptyGasto(),concepto:t,moneda:t.includes("CUP")?"CUP":"USD"}]}:pr))}>{t}</button>
+            <button className="btn bs bsm" onClick={()=>addGP(p.id)}>+ Gasto</button>
+            {[
+              {t:"Gastos importadora USD",m:"USD",o:true,r:true},
+              {t:"Gastos importadora CUP",m:"CUP",o:true,r:true},
+              {t:"Transporte",m:"USD",o:false,r:true},
+              {t:"Estibadores",m:"CUP",o:false,r:true},
+              {t:"Almuerzo estibadores",m:"CUP",o:false,r:true},
+            ].map(({t,m,o,r})=>(
+              <button key={t} className="btn bs bsm"
+                style={{borderColor:o&&r?"var(--bd2)":o?"rgba(167,139,250,.4)":"rgba(79,142,247,.4)",
+                        color:o&&r?"var(--tx2)":o?"var(--cup)":"var(--ac)"}}
+                onClick={()=>upd("productos",c.productos.map(pr=>pr.id===p.id?{...pr,gastos:[...(pr.gastos||[]),{...emptyGastoP(),concepto:t,moneda:m,enOnat:o,enReal:r}]}:pr))}>
+                {t}
+              </button>
             ))}
           </div>
 
@@ -478,9 +524,12 @@ function FichasProducto({p,c,rates,calcCont}){
   const nivelesOnat=calcNiveles(p.niveles||[],pCalc.costoOnatUnitCUP);
   const pvOnatCUP=toCUPonat(p.pvOnat||0,p.monedaPvOnat,rates);
   const pvRealUSD=toUSD(p.pvReal||0,p.monedaPvReal,rates);
-  const onatData=pvOnatCUP>0?calcOnat(nivelesCalc,pvOnatCUP,pCalc.costoOnatUnitCUP,pCalc.costoRealUnitUSD,pvRealUSD,pCalc.cantBase,rates):null;
-  const totImpUSD=onatData&&onatData.length>0?onatData[0].totalImpUSD:0;
-  const totImpCUP=onatData&&onatData.length>0?onatData[0].totalImpCUP:0;
+  // impuestos por unidad base
+  const imp11unit=pvOnatCUP>0?pvOnatCUP*0.11:0;
+  const utilOnatUnit=pvOnatCUP>0?pvOnatCUP-pCalc.costoOnatUnitCUP:0;
+  const imp35unit=utilOnatUnit>0?utilOnatUnit*0.35:0;
+  const totImpCUP=imp11unit+imp35unit;
+  const totImpUSD=totImpCUP/rates.mercado;
 
   return(
     <div className="card">
@@ -518,7 +567,7 @@ function FichasProducto({p,c,rates,calcCont}){
                     <td className="tusd">$ {fmt(n.costoUSD,4)}</td>
                     <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{fmt(n.costoUSD*rates.mercado,2)}</td>
                     <td className="tcup">{no?fmt(no.costoUSD,2):"-"} CUP</td>
-                    <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{no?"$ "+fmt(no.costoUSD/rates.mercado,4):"-"}</td>
+                    <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{no?"≈ $"+fmt(no.costoUSD/rates.mercado,4):"-"}</td>
                   </tr>);
                 })}
               </tbody>
@@ -534,8 +583,8 @@ function FichasProducto({p,c,rates,calcCont}){
         <div className="ficha-onat">
           <div className="ficha-title ft-onat">🧾 Ficha ONAT</div>
           <div className="frow sub"><span className="flbl2">CIF proporcional</span><ValCUP v={pCalc.cifOnatCUP} rates={rates}/></div>
-          {(p.gastosOnat||[]).map(g=>{
-            const cv=toCUPonat(g.monto,g.moneda,rates);
+          {(p.gastos||[]).filter(g=>g.enOnat).map(g=>{
+            const cv=toUSD(g.monto,g.moneda,rates)*rates.onat;
             return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto ONAT"}</span><ValCUP v={cv} rates={rates}/></div>);
           })}
           <div className="frow ftot"><span style={{color:"var(--cup)"}}>Costo Total ONAT</span><ValCUP v={pCalc.costoOnatTotalCUP} rates={rates}/></div>
@@ -552,12 +601,13 @@ function FichasProducto({p,c,rates,calcCont}){
               </div>
               <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
               <div style={{fontSize:11,fontWeight:700,color:"var(--ac4)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Impuestos ONAT / unidad</div>
-              <div className="frow sub"><span className="flbl2">11% sobre ventas ONAT</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(pvOnatCUP*0.11,2)} CUP</span></div>
-              <div className="frow sub"><span className="flbl2">35% sobre utilidad ONAT</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(Math.max(0,pvOnatCUP-pCalc.costoOnatUnitCUP)*0.35,2)} CUP</span></div>
+              <div className="frow sub"><span className="flbl2">11% sobre ventas ONAT</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp11unit,2)} CUP</span></div>
+              <div className="frow sub"><span className="flbl2">Utilidad ONAT</span><span className="fval-main" style={{color:utilOnatUnit>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{utilOnatUnit>=0?"+":""}{fmt(utilOnatUnit,2)} CUP</span></div>
+              <div className="frow sub"><span className="flbl2">35% sobre utilidad ONAT</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp35unit,2)} CUP</span></div>
               <div className="frow ftot" style={{borderTopColor:"var(--ac4)"}}><span style={{color:"var(--ac4)"}}>Total impuestos / unidad</span>
                 <span>
-                  <span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(pvOnatCUP*0.11+Math.max(0,pvOnatCUP-pCalc.costoOnatUnitCUP)*0.35,2)} CUP</span>
-                  <span className="fval-sec">≈ $ {fmt((pvOnatCUP*0.11+Math.max(0,pvOnatCUP-pCalc.costoOnatUnitCUP)*0.35)/rates.mercado,4)}</span>
+                  <span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(totImpCUP,2)} CUP</span>
+                  <span className="fval-sec">≈ $ {fmt(totImpUSD,4)}</span>
                 </span>
               </div>
               {/* Totales del lote */}
@@ -569,13 +619,13 @@ function FichasProducto({p,c,rates,calcCont}){
                 const totUtil=totVta-totCosto;
                 const tot11=totVta*0.11;
                 const tot35=totUtil>0?totUtil*0.35:0;
-                const totImpCUP=tot11+tot35;
+                const totImpCUPLote=tot11+tot35;
                 return(<>
                   <div className="frow sub"><span className="flbl2">Total ventas ONAT</span><span className="fval-main" style={{color:"var(--cup)",fontSize:12}}>{fmt(totVta,2)} CUP</span></div>
                   <div className="frow sub"><span className="flbl2">Impuesto 11%</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:12}}>{fmt(tot11,2)} CUP</span></div>
                   <div className="frow sub"><span className="flbl2">Impuesto 35%</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:12}}>{fmt(tot35,2)} CUP</span></div>
                   <div className="frow ftot" style={{borderTopColor:"var(--ac4)"}}><span style={{color:"var(--ac4)"}}>TOTAL IMPUESTOS LOTE</span>
-                    <span><span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(totImpCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(totImpCUP/rates.mercado,2)}</span></span>
+                    <span><span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(totImpCUPLote,2)} CUP</span><span className="fval-sec">≈ $ {fmt(totImpCUPLote/rates.mercado,2)}</span></span>
                   </div>
                 </>);
               })()}
@@ -592,7 +642,8 @@ function FichasProducto({p,c,rates,calcCont}){
           {pCalc.fleteR>0&&<div className="frow sub"><span className="flbl2">Flete prop.</span><ValUSD v={pCalc.fleteR}/></div>}
           {pCalc.thcdR>0&&<div className="frow sub"><span className="flbl2">THCD prop.</span><ValUSD v={pCalc.thcdR}/></div>}
           {pCalc.seguroR>0&&<div className="frow sub"><span className="flbl2">Seguro prop.</span><ValUSD v={pCalc.seguroR}/></div>}
-          {pCalc.gastosR>0&&<div className="frow sub"><span className="flbl2">Gastos reales prop.</span><ValUSD v={pCalc.gastosR}/></div>}
+          {(p.gastos||[]).filter(g=>g.enReal).map(g=><div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto"}</span><ValUSD v={toUSD(g.monto,g.moneda,rates)}/></div>)}
+          {pCalc.gastosLoteR>0&&<div className="frow sub"><span className="flbl2">Gastos lote prop.</span><ValUSD v={pCalc.gastosLoteR}/></div>}
           <div className="frow ftot"><span style={{color:"var(--ac)"}}>Costo Total Real</span>
             <span><span className="fval-main" style={{color:"var(--usd)"}}>$ {fmt(pCalc.costoRealTotalUSD,2)}</span><span className="fval-sec">{fmt(pCalc.costoRealTotalUSD*rates.mercado,0)} CUP</span></span>
           </div>
