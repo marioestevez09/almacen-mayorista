@@ -70,6 +70,11 @@
       const [pinMsg, setPinMsg] = useState('');
       const [fg, setFg] = useState({ cat:GCATS[0], conc:"", monto:"", cur:"USD" });
       const [fo, setFo] = useState({ tipo:"ingreso", conc:"", monto:"", cur:"USD" });
+      // Global tab
+      const [globalYear, setGlobalYear] = useState('todos');
+      // ONAT manual mode
+      const [onatMode, setOnatMode] = useState('auto');
+      const [onatManual, setOnatManual] = useState({ impVentas:'', impIngresos:'' });
 
       // ── GitHub Sync ──
       const [ghToken, setGhToken] = useState(() => localStorage.getItem('gh_token') || '');
@@ -584,6 +589,64 @@
       );
 
       
+      // ── ONAT effective values (auto or manual) ──
+      const onatEff = useMemo(() => {
+        const impV = onatMode==='manual' ? num(onatManual.impVentas) : onat.impVentas;
+        const impI = onatMode==='manual' ? num(onatManual.impIngresos) : onat.impIngresos;
+        const total = impV + impI;
+        return { impVentas: impV, impIngresos: impI, totalONAT: total,
+          usd_of: num(cfg.CUP_of)>0 ? total/num(cfg.CUP_of) : 0,
+          usd_inf: num(cfg.CUP_inf)>0 ? total/num(cfg.CUP_inf) : 0 };
+      }, [onat, onatMode, onatManual, cfg]);
+
+      // ── Helper: recalculate stats for any saved month ──
+      const calcMonthStats = (m) => {
+        if (!m || !m.cfg) return null;
+        const mc=m.cfg, mp=m.prods||[], mc2=m.compras||[], mv=m.ventas||[], mg=m.gastos||[], mo=m.otros||[], mi=m.imp||{};
+        const toU=(a,cur)=>{const v=num(a);if(cur==='USD')return v;if(cur==='CUP')return num(mc.CUP_inf)>0?v/num(mc.CUP_inf):0;if(cur==='EUR')return v*num(mc.EUR_usd);return v;};
+        const toCU=(a,cur)=>{const v=num(a);if(cur==='USD')return v*num(mc.CUP_of);if(cur==='CUP')return v;if(cur==='EUR')return v*num(mc.EUR_usd)*num(mc.CUP_of);return v;};
+        const cp={};mp.forEach(p=>{const cs=mc2.filter(c=>c.pid===p.id);const tq=cs.reduce((s,c)=>s+num(c.qty),0);const tv=cs.reduce((s,c)=>s+num(c.qty)*toU(c.punit,c.cur),0);cp[p.id]=tq>0?tv/tq:0;});
+        const vBruta=mv.reduce((s,v)=>s+v.items.reduce((ss,i)=>ss+num(i.qty)*toU(i.punit,i.cur),0),0);
+        const cVentas=mv.reduce((s,v)=>s+v.items.reduce((ss,i)=>ss+num(i.qty)*(cp[i.pid]||0),0),0);
+        const comis=mv.reduce((s,v)=>{const t=v.items.reduce((ss,i)=>ss+num(i.qty)*toU(i.punit,i.cur),0);return s+t*num(v.com)/100;},0);
+        const gOp=mg.reduce((s,g)=>s+toU(g.monto,g.cur),0);
+        const oIng=mo.filter(o=>o.tipo==="ingreso").reduce((s,o)=>s+toU(o.monto,o.cur),0);
+        const oGas=mo.filter(o=>o.tipo==="gasto").reduce((s,o)=>s+toU(o.monto,o.cur),0);
+        const totImp=toU(mi.isr||0,mi.curIsr||'USD')+toU(mi.ptu||0,mi.curPtu||'USD')+toU(mi.ex||0,mi.curEx||'USD');
+        const uBruta=vBruta-cVentas, uOper=uBruta-comis-gOp, uAnte=uOper+oIng-oGas, uNeta=uAnte-totImp;
+        const ventasCUP=mv.reduce((s,v)=>s+v.items.reduce((ss,i)=>ss+num(i.qty)*toCU(i.punit,i.cur),0),0);
+        const impV=ventasCUP*0.11, impI=uAnte*num(mc.CUP_of)>0?uAnte*num(mc.CUP_of)*0.35:0;
+        const onatTotal=impV+impI;
+        return { label:m.label||'', mes:mc.mes||'', anio:mc.anio||'',
+          vBruta, cVentas, uBruta, comis, gOp, uOper, oIng, oGas, totImp, uNeta, uAnte,
+          onatTotal, onatUsdInf: num(mc.CUP_inf)>0?onatTotal/num(mc.CUP_inf):0,
+          mbr: vBruta>0?uBruta/vBruta:0, mnr: vBruta>0?uNeta/vBruta:0 };
+      };
+
+      // ── Global stats ──
+      const allYears = useMemo(() => {
+        const ys = new Set(Object.values(allMonths).map(m=>String(m.cfg?.anio||'')).filter(Boolean));
+        return ['todos',...Array.from(ys).sort().reverse()];
+      }, [allMonths]);
+
+      const globalStats = useMemo(() => {
+        const months = Object.values(allMonths);
+        const filtered = globalYear==='todos' ? months : months.filter(m=>String(m.cfg?.anio)===String(globalYear));
+        return filtered.map(calcMonthStats).filter(Boolean).sort((a,b)=>{
+          const ma=MESES.indexOf(a.mes), mb=MESES.indexOf(b.mes);
+          return a.anio!==b.anio ? a.anio-b.anio : ma-mb;
+        });
+      }, [allMonths, globalYear]);
+
+      const consolidated = useMemo(() => {
+        return globalStats.reduce((acc,s)=>({
+          vBruta:acc.vBruta+s.vBruta, cVentas:acc.cVentas+s.cVentas, uBruta:acc.uBruta+s.uBruta,
+          comis:acc.comis+s.comis, gOp:acc.gOp+s.gOp, uOper:acc.uOper+s.uOper,
+          uNeta:acc.uNeta+s.uNeta, onatTotal:acc.onatTotal+s.onatTotal, onatUsdInf:acc.onatUsdInf+s.onatUsdInf,
+          oIng:acc.oIng+s.oIng, oGas:acc.oGas+s.oGas, totImp:acc.totImp+s.totImp
+        }),{vBruta:0,cVentas:0,uBruta:0,comis:0,gOp:0,uOper:0,uNeta:0,onatTotal:0,onatUsdInf:0,oIng:0,oGas:0,totImp:0});
+      }, [globalStats]);
+
       const syncColor = syncStatus==='ok'?ACE:syncStatus==='error'?RED:syncStatus==='saving'||syncStatus==='connecting'?GOLD:MUTED;
       const monthKeys = Object.keys(allMonths).sort((a,b)=>b.localeCompare(a));
 
@@ -618,7 +681,7 @@
 
           {/* TABS */}
           <div style={{background:MID,padding:"8px 16px",display:"flex",gap:4,flexWrap:"wrap",borderBottom:"1px solid #223d25"}}>
-            {[["meses","📁 Mis Meses"],["config","⚙ Config"],["prods","📦 Productos"],["compras","🛒 Compras"],["ventas","💰 Ventas"],["gastos","🏢 Gastos"],["otros","🔄 Otros"],["onat","🏛 ONAT"],["resultados","📊 Resultados"]].map(([t,l])=>(
+            {[["meses","📁 Mis Meses"],["config","⚙ Config"],["prods","📦 Productos"],["compras","🛒 Compras"],["ventas","💰 Ventas"],["gastos","🏢 Gastos"],["otros","🔄 Otros"],["onat","🏛 ONAT"],["global","🌍 Global"],["resultados","📊 Resultados"]].map(([t,l])=>(
               <button key={t} style={tabB(t)} onClick={()=>setTab(t)}>{l}</button>
             ))}
           </div>
@@ -1047,6 +1110,256 @@
                   </div>
                   <div style={{marginTop:10,padding:"8px 12px",background:BG,borderRadius:4,fontSize:10,color:"#9b7ac4",lineHeight:1.7}}>⚠ Cálculos orientativos. Confirmar con tu gestor de la ONAT.</div>
                 </div>
+              </div>
+            )}
+
+            {tab==="onat" && (
+              <div>
+                {/* Mode toggle */}
+                <div style={{...card,borderTop:"3px solid "+PUR}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:PUR,marginBottom:4}}>🏛 ONAT — Agencia Tributaria Cuba</div>
+                      <div style={{fontSize:11,color:MUTED}}>Tasa oficial: <span style={{color:PUR,fontFamily:"monospace",fontWeight:700}}>1 USD = {cfg.CUP_of} CUP</span>{"  ·  "}Informal: <span style={{color:GOLD,fontFamily:"monospace",fontWeight:700}}>1 USD = {cfg.CUP_inf} CUP</span></div>
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>setOnatMode('auto')} style={{padding:"8px 16px",borderRadius:4,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,background:onatMode==='auto'?PUR:MID2,color:onatMode==='auto'?BG:MUTED}}>⚙ Cálculo Automático</button>
+                      <button onClick={()=>setOnatMode('manual')} style={{padding:"8px 16px",borderRadius:4,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,background:onatMode==='manual'?GOLD:MID2,color:onatMode==='manual'?BG:MUTED}}>✏️ Manual</button>
+                    </div>
+                  </div>
+                  {onatMode==='manual' && (
+                    <div style={{marginTop:14,padding:"12px 14px",background:BG,borderRadius:4,border:"1px solid "+GOLD+'44'}}>
+                      <div style={{fontSize:11,color:GOLD,fontWeight:700,marginBottom:10}}>Ingresa los montos que pagaste / que te calcularon</div>
+                      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                        <div style={{flex:1,minWidth:180}}>
+                          <span style={{fontSize:10,color:MUTED,display:"block",marginBottom:3,textTransform:"uppercase",letterSpacing:"0.06em",fontWeight:700}}>11% Impuesto s/ Ventas (CUP)</span>
+                          <div style={{fontSize:10,color:MUTED,marginBottom:4,fontStyle:"italic"}}>Cálculo automático: {fmtCUP(onat.impVentas)}</div>
+                          <input style={{...INP,borderColor:GOLD+'55',borderRadius:4}} type="number" value={onatManual.impVentas} onChange={e=>setOnatManual(o=>({...o,impVentas:e.target.value}))} placeholder={onat.impVentas.toFixed(2)}/>
+                        </div>
+                        <div style={{flex:1,minWidth:180}}>
+                          <span style={{fontSize:10,color:MUTED,display:"block",marginBottom:3,textTransform:"uppercase",letterSpacing:"0.06em",fontWeight:700}}>35% Impuesto s/ Ingresos (CUP)</span>
+                          <div style={{fontSize:10,color:MUTED,marginBottom:4,fontStyle:"italic"}}>Cálculo automático: {fmtCUP(onat.impIngresos)}</div>
+                          <input style={{...INP,borderColor:GOLD+'55',borderRadius:4}} type="number" value={onatManual.impIngresos} onChange={e=>setOnatManual(o=>({...o,impIngresos:e.target.value}))} placeholder={onat.impIngresos.toFixed(2)}/>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+                    <div style={{background:BG,borderRadius:4,padding:"10px 16px",textAlign:"right",border:"1px solid "+PUR+'44'}}>
+                      <div style={{fontSize:10,color:MUTED}}>Total a Pagar ONAT</div>
+                      <div style={{fontSize:22,fontWeight:800,color:PUR,fontFamily:"'Courier New',monospace"}}>{fmtCUP(onatEff.totalONAT)}</div>
+                      <div style={{fontSize:10,color:GOLD,marginTop:2}}>≈ {fmtM(onatEff.usd_inf)} USD (informal)</div>
+                      {onatMode==='manual' && <div style={{fontSize:9,color:GOLD,marginTop:1}}>✏️ Valor manual</div>}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+                  <div style={{...card,borderTop:"2px solid "+GOLD}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <div style={{fontSize:12,fontWeight:700,color:GOLD}}>1. Impuesto s/ Ventas — 11%</div>
+                      {onatMode==='manual' && <span style={{fontSize:9,background:GOLD+'22',color:GOLD,padding:"2px 6px",borderRadius:3,fontWeight:700}}>MANUAL</span>}
+                    </div>
+                    {[{lbl:"Ventas totales (USD)",val:fmtM(st.vBruta),col:ACE},{lbl:"× Tasa oficial → CUP",val:fmtCUP(onat.ventasCUP),col:PUR}].map((r,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #223d25"}}><span style={{fontSize:11,color:MUTED}}>{r.lbl}</span><span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span></div>
+                    ))}
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"12px 10px",background:MID2,borderRadius:4,marginTop:8}}>
+                      <span style={{fontSize:13,fontWeight:700,color:LIGHT}}>= 11% Impuesto s/ Ventas</span>
+                      <span style={{fontFamily:"monospace",fontWeight:800,fontSize:16,color:GOLD}}>{fmtCUP(onatEff.impVentas)}</span>
+                    </div>
+                  </div>
+                  <div style={{...card,borderTop:"2px solid "+ACE}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <div style={{fontSize:12,fontWeight:700,color:ACE}}>2. Impuesto s/ Ingresos — 35%</div>
+                      {onatMode==='manual' && <span style={{fontSize:9,background:GOLD+'22',color:GOLD,padding:"2px 6px",borderRadius:3,fontWeight:700}}>MANUAL</span>}
+                    </div>
+                    {[{lbl:"Utilidad antes de imp. (USD)",val:fmtM(st.uAnte),col:num(st.uAnte)>=0?ACE:RED},{lbl:"× Tasa oficial → CUP",val:fmtCUP(onat.utilCUP),col:PUR}].map((r,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #223d25"}}><span style={{fontSize:11,color:MUTED}}>{r.lbl}</span><span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span></div>
+                    ))}
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"12px 10px",background:MID2,borderRadius:4,marginTop:8}}>
+                      <span style={{fontSize:13,fontWeight:700,color:LIGHT}}>= 35% Impuesto s/ Ingresos</span>
+                      <span style={{fontFamily:"monospace",fontWeight:800,fontSize:16,color:ACE}}>{fmtCUP(onatEff.impIngresos)}</span>
+                    </div>
+                    {onatMode==='auto'&&num(st.uAnte)<=0&&<div style={{fontSize:10,color:MUTED,fontStyle:"italic",marginTop:6}}>* No aplica — utilidad negativa o cero</div>}
+                  </div>
+                </div>
+
+                <div style={{...card,background:"#120d1e",border:"2px solid "+PUR}}>
+                  <div style={{fontSize:13,fontWeight:700,color:PUR,marginBottom:14}}>📋 Total ONAT a Pagar {onatMode==='manual'&&<span style={{fontSize:10,background:GOLD+'22',color:GOLD,padding:"2px 8px",borderRadius:3,marginLeft:8}}>MANUAL</span>}</div>
+                  {[{lbl:"Impuesto s/ Ventas (11%)",val:fmtCUP(onatEff.impVentas),col:GOLD},{lbl:"Impuesto s/ Ingresos (35%)",val:fmtCUP(onatEff.impIngresos),col:ACE}].map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #2a1a40"}}><span style={{color:MUTED}}>{r.lbl}</span><span style={{fontFamily:"monospace",color:r.col,fontWeight:600}}>{r.val}</span></div>))}
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"14px 0 8px"}}><span style={{fontSize:16,fontWeight:800,color:PUR}}>TOTAL A PAGAR</span><span style={{fontFamily:"monospace",fontWeight:800,fontSize:22,color:PUR}}>{fmtCUP(onatEff.totalONAT)}</span></div>
+                  <div style={{display:"flex",gap:12,flexWrap:"wrap",padding:"12px 0",borderTop:"1px solid #2a1a40"}}>
+                    <div style={{flex:1,background:BG,borderRadius:4,padding:"10px 12px"}}><div style={{fontSize:10,color:MUTED,marginBottom:2}}>USD (tasa oficial)</div><div style={{fontFamily:"monospace",color:MUTED,fontSize:13}}>{fmtM(onatEff.usd_of)}</div></div>
+                    <div style={{flex:1,background:BG,borderRadius:4,padding:"10px 12px",border:"1px solid "+GOLD+'44'}}><div style={{fontSize:10,color:MUTED,marginBottom:2}}>USD (tasa informal / real)</div><div style={{fontFamily:"monospace",color:GOLD,fontSize:13,fontWeight:700}}>{fmtM(onatEff.usd_inf)}</div></div>
+                  </div>
+                  <div style={{marginTop:10,padding:"8px 12px",background:BG,borderRadius:4,fontSize:10,color:"#9b7ac4",lineHeight:1.7}}>⚠ {onatMode==='manual'?'Valores ingresados manualmente. Recuerda guardar el mes para que queden registrados.':'Cálculos orientativos. Confirmar con tu gestor de la ONAT.'}</div>
+                </div>
+              </div>
+            )}
+
+            {/* ─── GLOBAL ─── */}
+            {tab==="global" && (
+              <div>
+                {/* Header + year filter */}
+                <div style={{...card,borderTop:"3px solid "+BLUE}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:BLUE}}>🌍 Estado de Resultados Global</div>
+                      <div style={{fontSize:11,color:MUTED,marginTop:2}}>{globalStats.length} mes(es) incluidos · Todos los montos en USD</div>
+                    </div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {allYears.map(y=>(
+                        <button key={y} onClick={()=>setGlobalYear(y)} style={{padding:"6px 14px",borderRadius:4,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,background:globalYear===y?BLUE:MID2,color:globalYear===y?BG:MUTED}}>
+                          {y==='todos'?'Todos los meses':y}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {globalStats.length===0 ? (
+                  <div style={{...card,textAlign:"center",padding:"30px 20px"}}>
+                    <div style={{fontSize:24,marginBottom:10}}>📭</div>
+                    <div style={{fontSize:13,color:LIGHT,marginBottom:6}}>No hay meses guardados{globalYear!=='todos'?` para ${globalYear}`:''}</div>
+                    <div style={{fontSize:11,color:MUTED}}>Guarda meses desde la pestaña 📁 Mis Meses</div>
+                  </div>
+                ) : (
+                  <div>
+                    {/* KPIs consolidados */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:8,marginBottom:14}}>
+                      {[
+                        {lbl:"Ventas Totales",val:fmtM(consolidated.vBruta),col:ACE},
+                        {lbl:"Utilidad Bruta",val:fmtM(consolidated.uBruta),col:consolidated.uBruta>=0?ACE:RED},
+                        {lbl:"Margen Bruto Prom.",val:consolidated.vBruta>0?(consolidated.uBruta/consolidated.vBruta*100).toFixed(1)+'%':'-',col:ACE},
+                        {lbl:"Utilidad Neta Total",val:fmtM(consolidated.uNeta),col:consolidated.uNeta>=0?ACE:RED},
+                        {lbl:"Margen Neto Prom.",val:consolidated.vBruta>0?(consolidated.uNeta/consolidated.vBruta*100).toFixed(1)+'%':'-',col:consolidated.uNeta>=0?ACE:RED},
+                        {lbl:"ONAT Acumulado",val:fmtCUP(consolidated.onatTotal),col:PUR},
+                        {lbl:"ONAT (equiv. USD inf.)",val:fmtM(consolidated.onatUsdInf),col:PUR},
+                        {lbl:"Comisiones Pagadas",val:fmtM(consolidated.comis),col:GOLD},
+                      ].map(k=>(
+                        <div key={k.lbl} style={{background:MID,borderRadius:4,padding:"12px 14px"}}>
+                          <div style={{fontSize:9,color:MUTED,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4,fontWeight:700,lineHeight:1.3}}>{k.lbl}</div>
+                          <div style={{fontSize:14,fontWeight:800,color:k.col,fontFamily:"'Courier New',monospace"}}>{k.val}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Gráfica de barras — Ventas y Utilidad */}
+                    <div style={{...card,marginBottom:14}}>
+                      <div style={{fontSize:12,fontWeight:700,color:ACE,marginBottom:14}}>📊 Evolución Mensual</div>
+                      {(() => {
+                        const maxV = Math.max(...globalStats.map(s=>s.vBruta), 1);
+                        const maxA = Math.max(...globalStats.map(s=>Math.abs(s.uNeta)), 1);
+                        const W = Math.max(globalStats.length * 70, 300);
+                        return (
+                          <div style={{overflowX:"auto"}}>
+                            <div style={{fontSize:10,color:MUTED,marginBottom:8,display:"flex",gap:16}}>
+                              <span><span style={{display:"inline-block",width:10,height:10,background:ACE,borderRadius:2,marginRight:4}}></span>Ventas</span>
+                              <span><span style={{display:"inline-block",width:10,height:10,background:GOLD,borderRadius:2,marginRight:4}}></span>Utilidad Neta</span>
+                            </div>
+                            <svg viewBox={`0 0 ${W+60} 200`} style={{width:"100%",minWidth:W+60,display:"block"}}>
+                              {globalStats.map((s,i)=>{
+                                const x = 40 + i*70;
+                                const hV = Math.round((s.vBruta/maxV)*120);
+                                const hU = Math.round((Math.abs(s.uNeta)/maxA)*80);
+                                const isNeg = s.uNeta < 0;
+                                const labelVal = s.vBruta >= 1000 ? `$${(s.vBruta/1000).toFixed(1)}k` : `$${s.vBruta.toFixed(0)}`;
+                                return (
+                                  <g key={i}>
+                                    {/* Ventas bar */}
+                                    <rect x={x} y={140-hV} width={28} height={hV} fill={ACE} rx={2} opacity={0.9}/>
+                                    {/* Utilidad bar */}
+                                    <rect x={x+30} y={isNeg?140:140-hU} width={28} height={hU} fill={isNeg?RED:GOLD} rx={2} opacity={0.9}/>
+                                    {/* Month label */}
+                                    <text x={x+28} y={158} textAnchor="middle" fontSize={9} fill={MUTED}>{s.mes.slice(0,3)}</text>
+                                    <text x={x+28} y={168} textAnchor="middle" fontSize={8} fill={MUTED}>{s.anio}</text>
+                                    {/* Value label */}
+                                    <text x={x+14} y={Math.max(134-hV,12)} textAnchor="middle" fontSize={8} fill={ACE}>{labelVal}</text>
+                                  </g>
+                                );
+                              })}
+                              {/* Baseline */}
+                              <line x1={35} y1={140} x2={W+55} y2={140} stroke="#223d25" strokeWidth={1}/>
+                            </svg>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Tabla comparativa mes a mes */}
+                    <div style={{...card,padding:0,marginBottom:14,overflow:"hidden"}}>
+                      <div style={{background:MID2,padding:"10px 14px",fontSize:11,fontWeight:700,color:BLUE}}>📋 Comparativo Mes a Mes</div>
+                      <div style={{overflowX:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",minWidth:600}}>
+                          <thead>
+                            <tr>
+                              <th style={TH}>Mes</th>
+                              <th style={{...TH,textAlign:"right"}}>Ventas USD</th>
+                              <th style={{...TH,textAlign:"right"}}>Costo Ventas</th>
+                              <th style={{...TH,textAlign:"right"}}>Util. Bruta</th>
+                              <th style={{...TH,textAlign:"right"}}>Margen B.</th>
+                              <th style={{...TH,textAlign:"right"}}>Gastos Op.</th>
+                              <th style={{...TH,textAlign:"right"}}>Util. Neta</th>
+                              <th style={{...TH,textAlign:"right"}}>Margen N.</th>
+                              <th style={{...TH,textAlign:"right"}}>ONAT (CUP)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {globalStats.map((s,i)=>(
+                              <tr key={i} style={{background:i%2===1?MID2:"transparent"}}>
+                                <td style={TD()}><strong style={{color:ACE}}>{s.mes}</strong> <span style={{fontSize:10,color:MUTED}}>{s.anio}</span></td>
+                                <td style={{...TD(ACE),textAlign:"right",fontFamily:"monospace"}}>{fmtM(s.vBruta)}</td>
+                                <td style={{...TD(MUTED),textAlign:"right",fontFamily:"monospace"}}>{fmtM(s.cVentas)}</td>
+                                <td style={{...TD(s.uBruta>=0?ACE:RED),textAlign:"right",fontFamily:"monospace"}}>{fmtM(s.uBruta)}</td>
+                                <td style={{...TD(s.mbr>=0.2?ACE:s.mbr>=0?GOLD:RED),textAlign:"right",fontFamily:"monospace"}}>{(s.mbr*100).toFixed(1)}%</td>
+                                <td style={{...TD(MUTED),textAlign:"right",fontFamily:"monospace"}}>{fmtM(s.comis+s.gOp)}</td>
+                                <td style={{...TD(s.uNeta>=0?ACE:RED),textAlign:"right",fontWeight:700,fontFamily:"monospace"}}>{fmtM(s.uNeta)}</td>
+                                <td style={{...TD(s.mnr>=0.08?ACE:s.mnr>=0?GOLD:RED),textAlign:"right",fontFamily:"monospace"}}>{(s.mnr*100).toFixed(1)}%</td>
+                                <td style={{...TD(PUR),textAlign:"right",fontFamily:"monospace"}}>{fmtCUP(s.onatTotal)}</td>
+                              </tr>
+                            ))}
+                            <tr style={{background:"#1a2e1c",borderTop:"2px solid "+ACE}}>
+                              <td style={{...TD(LIGHT),fontWeight:800}}>TOTAL / PROM.</td>
+                              <td style={{...TD(ACE),textAlign:"right",fontWeight:800,fontFamily:"monospace"}}>{fmtM(consolidated.vBruta)}</td>
+                              <td style={{...TD(MUTED),textAlign:"right",fontFamily:"monospace"}}>{fmtM(consolidated.cVentas)}</td>
+                              <td style={{...TD(consolidated.uBruta>=0?ACE:RED),textAlign:"right",fontWeight:800,fontFamily:"monospace"}}>{fmtM(consolidated.uBruta)}</td>
+                              <td style={{...TD(ACE),textAlign:"right",fontFamily:"monospace"}}>{consolidated.vBruta>0?(consolidated.uBruta/consolidated.vBruta*100).toFixed(1)+'%':'-'}</td>
+                              <td style={{...TD(MUTED),textAlign:"right",fontFamily:"monospace"}}>{fmtM(consolidated.comis+consolidated.gOp)}</td>
+                              <td style={{...TD(consolidated.uNeta>=0?ACE:RED),textAlign:"right",fontWeight:800,fontFamily:"monospace"}}>{fmtM(consolidated.uNeta)}</td>
+                              <td style={{...TD(ACE),textAlign:"right",fontFamily:"monospace"}}>{consolidated.vBruta>0?(consolidated.uNeta/consolidated.vBruta*100).toFixed(1)+'%':'-'}</td>
+                              <td style={{...TD(PUR),textAlign:"right",fontWeight:800,fontFamily:"monospace"}}>{fmtCUP(consolidated.onatTotal)}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Estado de Resultados Consolidado */}
+                    <div style={{...card,padding:0,overflow:"hidden"}}>
+                      <div style={{background:MID2,padding:"10px 14px",fontSize:11,fontWeight:700,color:BLUE}}>📄 Estado de Resultados Consolidado</div>
+                      <div style={{padding:"10px 0"}}>
+                        <SRow label="Ventas Brutas" val={consolidated.vBruta} bold={true}/>
+                        <SRow label="(-) Costo de Ventas" val={-consolidated.cVentas} indent={1}/>
+                        <div style={{height:1,background:"#223d25",margin:"4px 0"}}/>
+                        <SRow label="UTILIDAD BRUTA" val={consolidated.uBruta} big={true}/>
+                        <div style={{fontSize:10,color:MUTED,textAlign:"right",paddingRight:16,paddingBottom:6,fontFamily:"monospace"}}>Margen bruto: {consolidated.vBruta>0?(consolidated.uBruta/consolidated.vBruta*100).toFixed(1):0}%</div>
+                        <SRow label="(-) Comisiones" val={-consolidated.comis} indent={1}/>
+                        <SRow label="(-) Gastos Operativos" val={-consolidated.gOp} indent={1}/>
+                        <SRow label="= Total Gastos" val={-(consolidated.comis+consolidated.gOp)} bold={true}/>
+                        <div style={{height:1,background:"#223d25",margin:"4px 0"}}/>
+                        <SRow label="UTILIDAD DE OPERACIÓN" val={consolidated.uOper} big={true}/>
+                        {(consolidated.oIng>0||consolidated.oGas>0)&&(<div><SRow label="(+) Otros Ingresos" val={consolidated.oIng} indent={1}/><SRow label="(-) Otros Gastos" val={-consolidated.oGas} indent={1}/></div>)}
+                        <SRow label="(-) ONAT (equiv. USD inf.)" val={-consolidated.onatUsdInf} indent={1}/>
+                        <SRow label="(-) Otros Impuestos" val={-consolidated.totImp} indent={1}/>
+                        <div style={{height:1,background:"#223d25",margin:"4px 0"}}/>
+                        <div style={{padding:"4px 0 12px"}}>
+                          <SRow label="UTILIDAD NETA TOTAL" val={consolidated.uNeta} big={true}/>
+                          <div style={{fontSize:10,color:MUTED,textAlign:"right",paddingRight:16,fontFamily:"monospace"}}>Margen neto: {consolidated.vBruta>0?(consolidated.uNeta/consolidated.vBruta*100).toFixed(1):0}%</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
