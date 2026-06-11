@@ -298,12 +298,13 @@ function calcNiveles(niveles,costoUnitBase){
 
 // ── CÁLCULO DE IMPUESTOS ONAT ──
 function calcImpuestos(pvOnatCUP,costoOnatUnitCUP){
-  if(!pvOnatCUP||pvOnatCUP<=0)return{imp11:0,utilOnat:0,imp35:0,totalImpCUP:0};
+  if(!pvOnatCUP||pvOnatCUP<=0)return{imp11:0,utilOnat:0,utilNeta:0,imp35:0,totalImpCUP:0};
   const imp11=pvOnatCUP*0.11;
   const utilOnat=pvOnatCUP-costoOnatUnitCUP;
-  const imp35=utilOnat>0?utilOnat*0.35:0;
+  const utilNeta=utilOnat-imp11;          // utilidad después de restar el 11%
+  const imp35=utilNeta>0?utilNeta*0.35:0; // 35% sobre utilidad ya sin el 11%
   const totalImpCUP=imp11+imp35;
-  return{imp11,utilOnat,imp35,totalImpCUP};
+  return{imp11,utilOnat,utilNeta,imp35,totalImpCUP};
 }
 
 // ── INDICADORES DE RENTABILIDAD ──
@@ -688,10 +689,13 @@ function FichasProducto({p,c,rates,lote}){
             <div className="frow sub"><span className="flbl2">Utilidad ONAT / unidad</span>
               <span className="fval-main" style={{color:imp.utilOnat>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{imp.utilOnat>=0?"+":""}{fmt(imp.utilOnat,2)} CUP</span>
             </div>
+            <div className="frow sub"><span className="flbl2">Utilidad después del 11%</span>
+              <span className="fval-main" style={{color:imp.utilNeta>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{imp.utilNeta>=0?"+":""}{fmt(imp.utilNeta,2)} CUP</span>
+            </div>
             <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
             <div style={{fontSize:11,fontWeight:700,color:"var(--ac4)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Impuestos ONAT / unidad</div>
             <div className="frow sub"><span className="flbl2">11% sobre ventas</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp11,2)} CUP</span></div>
-            <div className="frow sub"><span className="flbl2">35% sobre utilidad</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp35,2)} CUP</span></div>
+            <div className="frow sub"><span className="flbl2">35% sobre utilidad (después del 11%)</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp35,2)} CUP</span></div>
             <div className="frow ftot" style={{borderTopColor:"var(--ac4)"}}><span style={{color:"var(--ac4)"}}>Total impuestos / unidad</span>
               <span><span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(imp.totalImpCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(totImpUSD,2)}</span></span>
             </div>
@@ -702,7 +706,8 @@ function FichasProducto({p,c,rates,lote}){
               const totCosto=pCalc.costoOnatTotalCUP;
               const totUtil=totVta-totCosto;
               const tot11=totVta*0.11;
-              const tot35=totUtil>0?totUtil*0.35:0;
+              const totUtilNeta=totUtil-tot11;
+              const tot35=totUtilNeta>0?totUtilNeta*0.35:0;
               const totImpL=tot11+tot35;
               return(<>
                 <div className="frow sub"><span className="flbl2">Ventas ONAT totales</span><span className="fval-main" style={{color:"var(--cup)",fontSize:12}}>{fmt(totVta,2)} CUP</span></div>
