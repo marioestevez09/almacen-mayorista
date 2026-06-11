@@ -102,7 +102,6 @@ tr:last-child td{border-bottom:none;}
 .alert{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px;display:flex;align-items:flex-start;gap:8px;}
 .ai{background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.3);color:var(--ac);}
 .aw{background:rgba(247,201,72,.1);border:1px solid rgba(247,201,72,.3);color:var(--ac3);}
-.aok{background:rgba(56,217,169,.1);border:1px solid rgba(56,217,169,.3);color:var(--ac2);}
 .empty{text-align:center;padding:60px 24px;color:var(--tx3);}
 .tag{display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500;background:var(--sf3);color:var(--tx2);border:1px solid var(--bd);}
 .sind{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx3);}
@@ -119,7 +118,6 @@ tr:last-child td{border-bottom:none;}
 .dh{background:linear-gradient(135deg,var(--sf2) 0%,var(--sf3) 100%);border:1px solid var(--bd);border-radius:12px;padding:20px 24px;margin-bottom:20px;}
 .dc{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ac);letter-spacing:2px;margin-bottom:6px;}
 .dn{font-size:22px;font-weight:700;margin-bottom:8px;}
-/* Fichas paralelas */
 .fichas-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
 @media(max-width:900px){.fichas-grid{grid-template-columns:1fr;}}
 .ficha-onat{background:rgba(167,139,250,.04);border:1px solid rgba(167,139,250,.25);border-radius:12px;padding:18px;}
@@ -134,12 +132,19 @@ tr:last-child td{border-bottom:none;}
 .flbl2{color:var(--tx2);font-size:12px;}
 .fval-main{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:14px;}
 .fval-sec{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--tx3);margin-left:6px;}
+/* indicadores rentabilidad */
+.rent-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+.rent-box{background:var(--sf3);border:1px solid var(--bd2);border-radius:8px;padding:10px 12px;}
+.rent-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--tx3);margin-bottom:2px;}
+.rent-val{font-family:"IBM Plex Mono",monospace;font-size:18px;font-weight:700;}
+.rent-formula{font-size:10px;color:var(--tx3);margin-top:3px;line-height:1.3;}
+.rent-base{font-size:10px;color:var(--tx3);margin-top:2px;font-style:italic;}
 /* tabla niveles */
 .niv-table th{background:var(--sf2);}
 .niv-table tr.niv-tot td{background:var(--sf3);font-weight:700;border-top:2px solid var(--bd2);}
-/* niv grid en modal */
+/* nivel grid modal */
 .ng{display:grid;grid-template-columns:120px 120px 80px 130px 32px;gap:8px;align-items:end;margin-bottom:8px;}
-@media(max-width:768px){.g2,.g3,.g4{grid-template-columns:1fr;}.fichas-grid{grid-template-columns:1fr;}.ng{grid-template-columns:1fr 1fr;}}
+@media(max-width:768px){.g2,.g3,.g4{grid-template-columns:1fr;}.fichas-grid{grid-template-columns:1fr;}.ng{grid-template-columns:1fr 1fr;}.rent-grid{grid-template-columns:1fr 1fr;}}
 </style>
 </head>
 <body>
@@ -150,17 +155,39 @@ const fmt=(n,d=2)=>{if(n===null||n===undefined||isNaN(n))return "0."+"0".repeat(
 const num=v=>parseFloat(v)||0;
 const uid=()=>Math.random().toString(36).slice(2,10);
 const today=()=>new Date().toISOString().slice(0,10);
+
 const TERMINOS=[{k:"CIF",l:"CIF — Costo, Seguro y Flete"},{k:"CFR",l:"CFR — Costo y Flete"},{k:"FOB",l:"FOB — Franco a Bordo"},{k:"NAC",l:"Compra Nacionalizada"},{k:"PROD",l:"Producción Propia"},{k:"OTRA",l:"Otra Vía"}];
 const TBADGE={CIF:"b-cif",CFR:"b-cfr",FOB:"b-fob",NAC:"b-nac",PROD:"b-prod",OTRA:"b-otra"};
 const MONEDAS=["USD","CUP","EUR"];
-const emptyGasto=()=>({id:uid(),concepto:"",monto:"",moneda:"USD"});
-const emptyGastoP=()=>({id:uid(),concepto:"",monto:"",moneda:"USD",enOnat:true,enReal:true});
-const emptyProd=()=>({id:uid(),nombre:"",codigo:"",precioFactura:"",monedaPrecio:"USD",tipoPrecio:"total",niveles:[],gastos:[],pvOnat:"",monedaPvOnat:"CUP",pvReal:"",monedaPvReal:"USD",notas:""});
-const defCont=()=>({id:uid(),codigo:"",nombre:"",termino:"CIF",proveedor:"",pais:"",fecha:today(),notas:"",
-  flete:"",monedaFlete:"USD",thcd:"",monedaThcd:"USD",seguroTipo:"pct",seguroValor:"",monedaSeguro:"USD",
-  gastos:[],productos:[]});
 
-// ── STORAGE ──
+// ── MODELOS DE DATOS ──
+// Gasto de LOTE: compartido, se distribuye entre productos por proporción
+// enOnat=true → entra en el costo base ONAT de cada producto
+// enReal=true → entra en el costo real de cada producto
+const emptyGastoLote=()=>({id:uid(),concepto:"",monto:"",moneda:"USD",enOnat:true,enReal:true});
+// Gasto ESPECÍFICO de producto: solo afecta a ese producto, solo va a ficha Real
+const emptyGastoProd=()=>({id:uid(),concepto:"",monto:"",moneda:"USD"});
+// Producto dentro del lote
+const emptyProd=()=>({
+  id:uid(),nombre:"",codigo:"",
+  precioFactura:"",monedaPrecio:"USD",tipoPrecio:"total",
+  niveles:[],          // [{id,nombre,unidad,total,porNivelAnterior}] nivel 0=unidad base
+  gastosEsp:[],        // gastos específicos del producto (solo Real)
+  pvOnat:"",monedaPvOnat:"CUP",
+  pvReal:"",monedaPvReal:"USD",
+  notas:""
+});
+// Lote / Contenedor
+const defCont=()=>({
+  id:uid(),codigo:"",nombre:"",termino:"CIF",proveedor:"",pais:"",fecha:today(),notas:"",
+  flete:"",monedaFlete:"USD",
+  thcd:"",monedaThcd:"USD",
+  seguroTipo:"pct",seguroValor:"",monedaSeguro:"USD",
+  gastos:[],     // gastos del lote con flags enOnat/enReal
+  productos:[]
+});
+
+// ── GIST ──
 async function loadGist(token,gistId){
   const r=await fetch("https://api.github.com/gists/"+gistId,{headers:{Authorization:"token "+token,Accept:"application/vnd.github.v3+json"}});
   if(!r.ok)throw new Error("Error "+r.status);
@@ -175,25 +202,23 @@ async function saveGist(token,gistId,payload){
   if(!r.ok)throw new Error("Error "+r.status);
 }
 
-// ── CÁLCULOS ──
-// Convierte a USD usando tasa mercado
+// ── CONVERSIONES ──
 const toUSD=(m,mon,rates)=>{
   if(mon==="USD")return num(m);
   if(mon==="EUR")return num(m)*rates.eurUsd;
   return num(m)/rates.mercado;
 };
-// Convierte a CUP usando tasa ONAT
 const toCUPonat=(m,mon,rates)=>{
   if(mon==="CUP")return num(m);
   if(mon==="USD")return num(m)*rates.onat;
-  if(mon==="EUR")return num(m)*rates.eurUsd*rates.onat;
-  return num(m);
+  return num(m)*rates.eurUsd*rates.onat;
 };
-// Convierte a USD usando tasa mercado desde CUP resultado ONAT
-const cupOnatToUSD=(cup,rates)=>cup/rates.mercado;
 
-function calcContenedor(c,rates){
+// ── CÁLCULO DEL LOTE ──
+// Retorna totales del lote para distribución posterior
+function calcLote(c,rates){
   const prods=c.productos||[];
+  // Valor mercancía = suma de precios de factura de todos los productos en USD
   let valorMercUSD=0;
   prods.forEach(p=>{
     let pu=toUSD(p.precioFactura,p.monedaPrecio,rates);
@@ -206,307 +231,393 @@ function calcContenedor(c,rates){
   if(c.seguroTipo==="pct")seguroUSD=valorMercUSD*(num(c.seguroValor)/100);
   else seguroUSD=toUSD(c.seguroValor,c.monedaSeguro,rates);
   const cifUSD=valorMercUSD+fleteUSD+thcdUSD+seguroUSD;
-  const gastosUSD=(c.gastos||[]).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
-  const costoTotalUSD=cifUSD+gastosUSD;
-  return {valorMercUSD,fleteUSD,thcdUSD,seguroUSD,cifUSD,gastosUSD,costoTotalUSD};
+  // Gastos del lote totales (para info general)
+  const gastosLoteOnatUSD=(c.gastos||[]).filter(g=>g.enOnat).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
+  const gastosLoteRealUSD=(c.gastos||[]).filter(g=>g.enReal).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
+  const costoTotalUSD=cifUSD+gastosLoteRealUSD;
+  return {valorMercUSD,fleteUSD,thcdUSD,seguroUSD,cifUSD,gastosLoteOnatUSD,gastosLoteRealUSD,costoTotalUSD};
 }
 
-function calcProducto(p,c,rates,calcCont){
+// ── CÁLCULO POR PRODUCTO ──
+// Un solo costo unitario USD se calcula primero.
+// Al final: ONAT multiplica por tasa ONAT → CUP. Real queda en USD.
+function calcProducto(p,c,rates,lote){
   const cantBase=num((p.niveles||[])[0]?.total||0);
+  // Precio mercancía del producto en USD
   let precioMercUSD=toUSD(p.precioFactura,p.monedaPrecio,rates);
   if(p.tipoPrecio==="unit")precioMercUSD*=cantBase;
-  const prop=calcCont.valorMercUSD>0?precioMercUSD/calcCont.valorMercUSD:0;
-
-  // CIF proporcional (compartido)
-  const cifPropUSD=(calcCont.fleteUSD+calcCont.thcdUSD+calcCont.seguroUSD)*prop;
-  const fleteR=calcCont.fleteUSD*prop;
-  const thcdR=calcCont.thcdUSD*prop;
-  const seguroR=calcCont.seguroUSD*prop;
-
-  // Gastos filtrados por ficha (enOnat / enReal)
-  const gastosRealUSD=(p.gastos||[]).filter(g=>g.enReal).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
-  const gastosOnatUSD=(p.gastos||[]).filter(g=>g.enOnat).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
-  // Gastos lote real (distribuidos)
-  const gastosLoteR=calcCont.gastosUSD*prop;
-
-  // ── BASE COMPARTIDA: CIF + importadora ──
-  // Importadora ya está en gastos del producto filtrada arriba como enOnat+enReal
-  // Base = mercancía + CIF proporcional
+  // Proporción del valor total del lote
+  const prop=lote.valorMercUSD>0?precioMercUSD/lote.valorMercUSD:0;
+  // CIF proporcional (flete+THCD+seguro distribuidos por valor)
+  const fleteP=lote.fleteUSD*prop;
+  const thcdP=lote.thcdUSD*prop;
+  const seguroP=lote.seguroUSD*prop;
+  const cifPropUSD=fleteP+thcdP+seguroP;
+  // BASE COMPARTIDA: precio mercancía + CIF proporcional
   const baseUSD=precioMercUSD+cifPropUSD;
+  // Gastos del LOTE filtrados y distribuidos por proporción
+  const gastosLoteOnatP=lote.gastosLoteOnatUSD*prop;  // van a ONAT
+  const gastosLoteRealP=lote.gastosLoteRealUSD*prop;  // van a Real
+  // Gastos específicos del producto (solo Real)
+  const gastosEspUSD=(p.gastosEsp||[]).reduce((s,g)=>s+toUSD(g.monto,g.moneda,rates),0);
 
-  // ── FICHA REAL: base + gastos marcados enReal + gastos lote ──
-  const costoRealTotalUSD=baseUSD+gastosRealUSD+gastosLoteR;
-  const costoRealUnitUSD=cantBase>0?costoRealTotalUSD/cantBase:0;
-
-  // ── FICHA ONAT: base + gastos marcados enOnat → en USD → × tasa ONAT = CUP ──
-  const costoOnatTotalUSD=baseUSD+gastosOnatUSD;
+  // ── FICHA ONAT (en USD primero, luego × tasa ONAT al final) ──
+  // Costo ONAT USD = base + gastos lote marcados enOnat (proporción)
+  const costoOnatTotalUSD=baseUSD+gastosLoteOnatP;
   const costoOnatUnitUSD=cantBase>0?costoOnatTotalUSD/cantBase:0;
+  // Al final aplicamos la tasa ONAT para expresar en CUP
   const costoOnatUnitCUP=costoOnatUnitUSD*rates.onat;
   const costoOnatTotalCUP=costoOnatTotalUSD*rates.onat;
+  // CIF proporcional en CUP (para display en ficha ONAT)
+  const cifOnatCUP=baseUSD*rates.onat;
 
-  return {cantBase,prop,precioMercUSD,fleteR,thcdR,seguroR,
-    baseUSD,gastosRealUSD,gastosOnatUSD,gastosLoteR,
-    costoRealTotalUSD,costoRealUnitUSD,
-    costoOnatTotalUSD,costoOnatUnitUSD,costoOnatUnitCUP,costoOnatTotalCUP};
+  // ── FICHA REAL (todo en USD con tasa mercado) ──
+  // Costo Real USD = base + gastos lote marcados enReal + gastos específicos producto
+  const costoRealTotalUSD=baseUSD+gastosLoteRealP+gastosEspUSD;
+  const costoRealUnitUSD=cantBase>0?costoRealTotalUSD/cantBase:0;
+
+  return {
+    cantBase,prop,precioMercUSD,fleteP,thcdP,seguroP,cifPropUSD,
+    baseUSD,gastosLoteOnatP,gastosLoteRealP,gastosEspUSD,
+    costoOnatTotalUSD,costoOnatUnitUSD,costoOnatUnitCUP,costoOnatTotalCUP,cifOnatCUP,
+    costoRealTotalUSD,costoRealUnitUSD
+  };
 }
 
+// ── CÁLCULO DE NIVELES DE EMPAQUE ──
+// Recibe costoUnitBase (en cualquier moneda) y calcula costo por cada nivel
 function calcNiveles(niveles,costoUnitBase){
   if(!niveles||!niveles.length)return[];
   return niveles.map((n,i)=>{
     let ub=1;
+    // unidadesBase acumula multiplicando porNivelAnterior desde nivel 1 en adelante
     if(i>0){for(let j=1;j<=i;j++)ub*=num(niveles[j].porNivelAnterior||0);}
-    return {...n,unidadesBase:ub,costoUSD:costoUnitBase*ub};
+    return {...n,unidadesBase:ub,costo:costoUnitBase*ub};
   });
 }
 
+// ── CÁLCULO DE IMPUESTOS ONAT ──
+function calcImpuestos(pvOnatCUP,costoOnatUnitCUP){
+  if(!pvOnatCUP||pvOnatCUP<=0)return{imp11:0,utilOnat:0,imp35:0,totalImpCUP:0};
+  const imp11=pvOnatCUP*0.11;
+  const utilOnat=pvOnatCUP-costoOnatUnitCUP;
+  const imp35=utilOnat>0?utilOnat*0.35:0;
+  const totalImpCUP=imp11+imp35;
+  return{imp11,utilOnat,imp35,totalImpCUP};
+}
+
+// ── INDICADORES DE RENTABILIDAD ──
+// markup = utilidad / costo × 100 (cuánto gano sobre lo que invertí)
+// margen = utilidad / ventas × 100 (cuánto de cada peso vendido es ganancia)
+function calcRentabilidad(costoUSD,pvUSD,impuestosUSD){
+  if(!costoUSD||costoUSD<=0||!pvUSD||pvUSD<=0)return null;
+  const margenBruto=pvUSD-costoUSD;
+  const margenNeto=margenBruto-impuestosUSD;
+  const markupBruto=costoUSD>0?(margenBruto/costoUSD)*100:0;
+  const markupNeto=costoUSD>0?(margenNeto/costoUSD)*100:0;
+  const margenBrutoPct=pvUSD>0?(margenBruto/pvUSD)*100:0;
+  const margenNetoPct=pvUSD>0?(margenNeto/pvUSD)*100:0;
+  return{margenBruto,margenNeto,markupBruto,markupNeto,margenBrutoPct,margenNetoPct};
+}
 
 // ── PIN ──
 function PinScreen({onUnlock,storedHash}){
-  const [digits,setDigits]=useState("");const [error,setError]=useState("");
-  const [setup,setSetup]=useState(!storedHash);const [confirm,setConfirm]=useState("");const [step,setStep]=useState(1);
+  const [digits,setDigits]=useState("");
+  const [error,setError]=useState("");
+  const [setup,setSetup]=useState(!storedHash);
+  const [confirm,setConfirm]=useState("");
+  const [step,setStep]=useState(1);
   const hashPin=async p=>{const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(p));return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");};
   const press=async d=>{
-    if(digits.length>=6)return;const next=digits+d;setDigits(next);setError("");
+    if(digits.length>=6)return;
+    const next=digits+d;setDigits(next);setError("");
     if(next.length===6){
-      if(setup){if(step===1){setConfirm(next);setDigits("");setStep(2);}
-        else{if(next===confirm){const h=await hashPin(next);onUnlock(h,true);}else{setError("Los PINs no coinciden");setDigits("");setStep(1);setConfirm("");}}}
-      else{const h=await hashPin(next);if(h===storedHash)onUnlock(h,false);else{setError("PIN incorrecto");setDigits("");}}
+      if(setup){
+        if(step===1){setConfirm(next);setDigits("");setStep(2);}
+        else{if(next===confirm){const h=await hashPin(next);onUnlock(h,true);}else{setError("Los PINs no coinciden");setDigits("");setStep(1);setConfirm("");}}
+      }else{const h=await hashPin(next);if(h===storedHash)onUnlock(h,false);else{setError("PIN incorrecto");setDigits("");}}
     }
   };
   const del=()=>{setDigits(d=>d.slice(0,-1));setError("");};
-  return(<div className="pin-overlay"><div className="pin-card">
-    <div className="pin-logo">Almacén Mayorista</div><div className="pin-title">Fichas de Costo</div>
-    <div className="pin-sub">{setup?(step===1?"Crea tu PIN (6 dígitos)":"Confirma tu PIN"):"Ingresa tu PIN"}</div>
-    <div className="pin-dots">{[...Array(6)].map((_,i)=><div key={i} className={"pin-dot"+(i<digits.length?" filled":"")}/>)}</div>
-    <div className="pin-grid">{[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i)=><button key={i} className="pin-btn" onClick={()=>d===""?null:d==="⌫"?del():press(String(d))} style={d===""?{visibility:"hidden"}:{}}>{d}</button>)}</div>
-    <div className="pin-error">{error}</div>
-  </div></div>);
+  return(
+    <div className="pin-overlay"><div className="pin-card">
+      <div className="pin-logo">Almacén Mayorista</div>
+      <div className="pin-title">Fichas de Costo</div>
+      <div className="pin-sub">{setup?(step===1?"Crea tu PIN (6 dígitos)":"Confirma tu PIN"):"Ingresa tu PIN"}</div>
+      <div className="pin-dots">{[...Array(6)].map((_,i)=><div key={i} className={"pin-dot"+(i<digits.length?" filled":"")}/>)}</div>
+      <div className="pin-grid">{[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i)=><button key={i} className="pin-btn" onClick={()=>d===""?null:d==="⌫"?del():press(String(d))} style={d===""?{visibility:"hidden"}:{}}>{d}</button>)}</div>
+      <div className="pin-error">{error}</div>
+    </div></div>
+  );
 }
 
-// ── SUBCOMPONENTES ──
 const MSel=({value,onChange,style})=><select className="fsel" value={value} onChange={e=>onChange(e.target.value)} style={style}>{MONEDAS.map(m=><option key={m}>{m}</option>)}</select>;
+
+// ── COMPONENTE INDICADORES ──
+function IndicadoresRent({rent,lote=false}){
+  if(!rent)return null;
+  const color=v=>v>=0?"var(--ac2)":"var(--ac4)";
+  return(
+    <div style={{marginTop:12}}>
+      <div style={{fontSize:10,fontWeight:700,color:"var(--ac)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>
+        📊 Indicadores de Rentabilidad {lote?"— Total Lote":"— Por Unidad Base"}
+      </div>
+      <div style={{fontSize:10,color:"var(--tx3)",marginBottom:8,fontStyle:"italic"}}>
+        Base: costo puesto en almacén (CIF + gastos operativos)
+      </div>
+      <div className="rent-grid">
+        <div className="rent-box">
+          <div className="rent-lbl">Markup bruto</div>
+          <div className="rent-val" style={{color:color(rent.markupBruto)}}>{fmt(rent.markupBruto,2)}%</div>
+          <div className="rent-formula">Utilidad bruta / Costo × 100</div>
+          <div className="rent-base">{lote?"Lote completo":"Por unidad base"}</div>
+        </div>
+        <div className="rent-box">
+          <div className="rent-lbl">Markup neto</div>
+          <div className="rent-val" style={{color:color(rent.markupNeto)}}>{fmt(rent.markupNeto,2)}%</div>
+          <div className="rent-formula">Utilidad neta / Costo × 100</div>
+          <div className="rent-base">Después de impuestos ONAT</div>
+        </div>
+        <div className="rent-box">
+          <div className="rent-lbl">Margen bruto</div>
+          <div className="rent-val" style={{color:color(rent.margenBrutoPct)}}>{fmt(rent.margenBrutoPct,2)}%</div>
+          <div className="rent-formula">Utilidad bruta / Ventas × 100</div>
+          <div className="rent-base">{lote?"Lote completo":"Por unidad base"}</div>
+        </div>
+        <div className="rent-box">
+          <div className="rent-lbl">Margen neto</div>
+          <div className="rent-val" style={{color:color(rent.margenNetoPct)}}>{fmt(rent.margenNetoPct,2)}%</div>
+          <div className="rent-formula">Utilidad neta / Ventas × 100</div>
+          <div className="rent-base">Después de impuestos ONAT</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── MODAL CONTENEDOR ──
 function ContenedorModal({inicial,rates,onSave,onClose}){
-  const [c,setC]=useState(inicial);
+  const [c,setC]=useState(()=>JSON.parse(JSON.stringify(inicial)));
   const upd=(k,v)=>setC(p=>({...p,[k]:v}));
-  const addG=()=>upd("gastos",[...(c.gastos||[]),emptyGasto()]);
-  const updG=(id,k,v)=>upd("gastos",c.gastos.map(g=>g.id===id?{...g,[k]:v}:g));
-  const delG=id=>upd("gastos",c.gastos.filter(g=>g.id!==id));
-  const addP=()=>upd("productos",[...(c.productos||[]),emptyProd()]);
-  const delP=id=>upd("productos",c.productos.filter(p=>p.id!==id));
-  const updP=(id,k,v)=>upd("productos",c.productos.map(p=>p.id===id?{...p,[k]:v}:p));
-  const addN=pid=>upd("productos",c.productos.map(p=>{if(p.id!==pid)return p;const idx=(p.niveles||[]).length;return {...p,niveles:[...(p.niveles||[]),{id:uid(),nombre:"",unidad:"",total:"",porNivelAnterior:""}]};}));
-  const delN=(pid,nid)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,niveles:p.niveles.filter(n=>n.id!==nid)}:p));
-  const updN=(pid,nid,k,v)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,niveles:p.niveles.map(n=>n.id===nid?{...n,[k]:v}:n)}:p));
-  const addGP=pid=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastos:[...(p.gastos||[]),emptyGastoP()]}:p));
-  const updGP=(pid,id,k,v)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastos:(p.gastos||[]).map(g=>g.id===id?{...g,[k]:v}:g)}:p));
-  const delGP=(pid,id)=>upd("productos",c.productos.map(p=>p.id===pid?{...p,gastos:(p.gastos||[]).filter(g=>g.id!==id)}:p));
 
-  const calcCont=calcContenedor(c,rates);
+  // Gastos del LOTE
+  const addGL=()=>setC(p=>({...p,gastos:[...(p.gastos||[]),emptyGastoLote()]}));
+  const updGL=(id,k,v)=>setC(p=>({...p,gastos:p.gastos.map(g=>g.id===id?{...g,[k]:v}:g)}));
+  const delGL=id=>setC(p=>({...p,gastos:p.gastos.filter(g=>g.id!==id)}));
+
+  // Productos
+  const addP=()=>setC(p=>({...p,productos:[...(p.productos||[]),emptyProd()]}));
+  const delP=id=>setC(p=>({...p,productos:p.productos.filter(x=>x.id!==id)}));
+  const updP=(id,k,v)=>setC(p=>({...p,productos:p.productos.map(x=>x.id===id?{...x,[k]:v}:x)}));
+
+  // Niveles del producto
+  const addN=pid=>setC(p=>({...p,productos:p.productos.map(x=>x.id===pid?{...x,niveles:[...(x.niveles||[]),{id:uid(),nombre:"",unidad:"",total:"",porNivelAnterior:""}]}:x)}));
+  const delN=(pid,nid)=>setC(p=>({...p,productos:p.productos.map(x=>x.id===pid?{...x,niveles:x.niveles.filter(n=>n.id!==nid)}:x)}));
+  const updN=(pid,nid,k,v)=>setC(p=>({...p,productos:p.productos.map(x=>x.id===pid?{...x,niveles:x.niveles.map(n=>n.id===nid?{...n,[k]:v}:n)}:x)}));
+
+  // Gastos específicos del producto
+  const addGP=pid=>setC(p=>({...p,productos:p.productos.map(x=>x.id===pid?{...x,gastosEsp:[...(x.gastosEsp||[]),emptyGastoProd()]}:x)}));
+  const updGP=(pid,id,k,v)=>setC(p=>({...p,productos:p.productos.map(x=>x.id===pid?{...x,gastosEsp:(x.gastosEsp||[]).map(g=>g.id===id?{...g,[k]:v}:g)}:x)}));
+  const delGP=(pid,id)=>setC(p=>({...p,productos:p.productos.map(x=>x.id===pid?{...x,gastosEsp:(x.gastosEsp||[]).filter(g=>g.id!==id)}:x)}));
+
+  const lote=calcLote(c,rates);
   const esCIF=["CIF","CFR","FOB"].includes(c.termino);
-  const isValid=c.nombre&&(c.productos||[]).length>0&&(c.productos||[]).every(p=>p.nombre);
+  const isValid=c.nombre&&(c.productos||[]).length>0&&c.productos.every(p=>p.nombre);
 
-  return(<div className="mo" onClick={e=>{if(e.target.classList.contains("mo"))onClose();}}>
-    <div className="md">
-      <div className="mh"><div className="mt">{inicial.codigo?"✎ Editar Lote":"➕ Nuevo Lote / Contenedor"}</div><button className="mc" onClick={onClose}>✕</button></div>
+  return(
+    <div className="mo" onClick={e=>{if(e.target.classList.contains("mo"))onClose();}}>
+      <div className="md">
+        <div className="mh"><div className="mt">{inicial.id&&inicial.nombre?"✎ Editar Lote":"➕ Nuevo Lote / Contenedor"}</div><button className="mc" onClick={onClose}>✕</button></div>
 
-      <div className="sec">Datos del Lote</div>
-      <div className="fg g3" style={{marginBottom:12}}>
-        <div className="fgrp"><label className="flbl">Nombre *</label><input className="finp" value={c.nombre} onChange={e=>upd("nombre",e.target.value)} placeholder="Ej: Contenedor huevos marzo 2025"/></div>
-        <div className="fgrp"><label className="flbl">Código</label><input className="finp mono" value={c.codigo||""} onChange={e=>upd("codigo",e.target.value)} placeholder="CONT-001"/></div>
-        <div className="fgrp"><label className="flbl">Fecha</label><input className="finp" type="date" value={c.fecha} onChange={e=>upd("fecha",e.target.value)}/></div>
-      </div>
-      <div className="fg g3" style={{marginBottom:12}}>
-        <div className="fgrp"><label className="flbl">Término</label>
-          <select className="fsel" value={c.termino} onChange={e=>upd("termino",e.target.value)}>{TERMINOS.map(t=><option key={t.k} value={t.k}>{t.l}</option>)}</select>
-        </div>
-        <div className="fgrp"><label className="flbl">Proveedor</label><input className="finp" value={c.proveedor||""} onChange={e=>upd("proveedor",e.target.value)} placeholder="Importadora / Proveedor"/></div>
-        <div className="fgrp"><label className="flbl">País de origen</label><input className="finp" value={c.pais||""} onChange={e=>upd("pais",e.target.value)} placeholder="China, España..."/></div>
-      </div>
-
-      {esCIF&&(<>
-        <div className="sec">Flete, THCD y Seguro</div>
-        <div className="alert ai" style={{marginBottom:10}}>{c.termino==="CIF"?"CIF: flete y seguro incluidos en precio. Desglósalos para mayor detalle.":c.termino==="CFR"?"CFR: flete incluido. Agrega el seguro.":"FOB: agrega flete, THCD y seguro para calcular el valor CIF."}</div>
+        <div className="sec">Datos del Lote</div>
         <div className="fg g3" style={{marginBottom:12}}>
-          <div className="fgrp"><label className="flbl">Flete</label><div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.01" min="0" value={c.flete||""} onChange={e=>upd("flete",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={c.monedaFlete} onChange={v=>upd("monedaFlete",v)} style={{width:78}}/></div></div>
-          <div className="fgrp"><label className="flbl">THCD</label><div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.01" min="0" value={c.thcd||""} onChange={e=>upd("thcd",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={c.monedaThcd} onChange={v=>upd("monedaThcd",v)} style={{width:78}}/></div></div>
-          <div className="fgrp"><label className="flbl">Seguro</label>
-            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-              <select className="fsel" value={c.seguroTipo} onChange={e=>upd("seguroTipo",e.target.value)} style={{width:100}}><option value="pct">% valor</option><option value="fijo">Monto fijo</option></select>
-              <input className="finp mono" type="number" step="0.0001" min="0" value={c.seguroValor||""} onChange={e=>upd("seguroValor",e.target.value)} placeholder={c.seguroTipo==="pct"?"0.50":"0.00"} style={{flex:1}}/>
-              {c.seguroTipo==="fijo"&&<MSel value={c.monedaSeguro} onChange={v=>upd("monedaSeguro",v)} style={{width:78}}/>}
-              {c.seguroTipo==="pct"&&<span style={{fontSize:11,color:"var(--tx2)",whiteSpace:"nowrap"}}>% del valor merc.</span>}
+          <div className="fgrp"><label className="flbl">Nombre *</label><input className="finp" value={c.nombre} onChange={e=>upd("nombre",e.target.value)} placeholder="Ej: Contenedor huevos marzo 2025"/></div>
+          <div className="fgrp"><label className="flbl">Código</label><input className="finp mono" value={c.codigo||""} onChange={e=>upd("codigo",e.target.value)} placeholder="CONT-001"/></div>
+          <div className="fgrp"><label className="flbl">Fecha</label><input className="finp" type="date" value={c.fecha} onChange={e=>upd("fecha",e.target.value)}/></div>
+        </div>
+        <div className="fg g3" style={{marginBottom:12}}>
+          <div className="fgrp"><label className="flbl">Término</label>
+            <select className="fsel" value={c.termino} onChange={e=>upd("termino",e.target.value)}>{TERMINOS.map(t=><option key={t.k} value={t.k}>{t.l}</option>)}</select>
+          </div>
+          <div className="fgrp"><label className="flbl">Proveedor</label><input className="finp" value={c.proveedor||""} onChange={e=>upd("proveedor",e.target.value)} placeholder="Importadora / Proveedor"/></div>
+          <div className="fgrp"><label className="flbl">País de origen</label><input className="finp" value={c.pais||""} onChange={e=>upd("pais",e.target.value)} placeholder="China, España..."/></div>
+        </div>
+
+        {esCIF&&(<>
+          <div className="sec">Flete, THCD y Seguro</div>
+          <div className="alert ai" style={{marginBottom:10}}>{c.termino==="CIF"?"CIF: flete y seguro incluidos. Desglósalos para mayor detalle.":c.termino==="CFR"?"CFR: flete incluido. Agrega el seguro.":"FOB: agrega flete, THCD y seguro para llegar al CIF."}</div>
+          <div className="fg g3" style={{marginBottom:12}}>
+            <div className="fgrp"><label className="flbl">Flete</label><div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.01" min="0" value={c.flete||""} onChange={e=>upd("flete",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={c.monedaFlete} onChange={v=>upd("monedaFlete",v)} style={{width:78}}/></div></div>
+            <div className="fgrp"><label className="flbl">THCD</label><div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.01" min="0" value={c.thcd||""} onChange={e=>upd("thcd",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={c.monedaThcd} onChange={v=>upd("monedaThcd",v)} style={{width:78}}/></div></div>
+            <div className="fgrp"><label className="flbl">Seguro</label>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <select className="fsel" value={c.seguroTipo} onChange={e=>upd("seguroTipo",e.target.value)} style={{width:100}}><option value="pct">% valor</option><option value="fijo">Monto fijo</option></select>
+                <input className="finp mono" type="number" step="0.0001" min="0" value={c.seguroValor||""} onChange={e=>upd("seguroValor",e.target.value)} placeholder={c.seguroTipo==="pct"?"0.50":"0.00"} style={{flex:1}}/>
+                {c.seguroTipo==="fijo"&&<MSel value={c.monedaSeguro} onChange={v=>upd("monedaSeguro",v)} style={{width:78}}/>}
+                {c.seguroTipo==="pct"&&<span style={{fontSize:11,color:"var(--tx2)"}}>% del valor</span>}
+              </div>
             </div>
           </div>
-        </div>
-      </>)}
+        </>)}
 
-      <div className="sec">Gastos Reales del Lote <span style={{fontSize:10,color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0}}>(se distribuyen a tasa mercado en la ficha REAL)</span></div>
-      <div className="alert ai" style={{marginBottom:10}}>Estos gastos van a la ficha REAL. Para gastos que ve la ONAT, agrégalos dentro de cada producto.</div>
-      {(c.gastos||[]).map((g,gi)=>(
-        <div key={g.id} style={{display:"grid",gridTemplateColumns:"1fr 150px 85px 32px",gap:8,marginBottom:8,alignItems:"end"}}>
-          <div className="fgrp">{gi===0&&<label className="flbl">Concepto</label>}<input className="finp" value={g.concepto} onChange={e=>updG(g.id,"concepto",e.target.value)} placeholder="Transporte, Estibadores, Almacenaje..."/></div>
-          <div className="fgrp">{gi===0&&<label className="flbl">Monto</label>}<input className="finp mono" type="number" step="0.01" min="0" value={g.monto} onChange={e=>updG(g.id,"monto",e.target.value)} placeholder="0.00"/></div>
-          <div className="fgrp">{gi===0&&<label className="flbl">Moneda</label>}<MSel value={g.moneda} onChange={v=>updG(g.id,"moneda",v)}/></div>
-          <button className="btn bd2 bsm" style={{marginTop:gi===0?20:0}} onClick={()=>delG(g.id)}>✕</button>
-        </div>
-      ))}
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-        <button className="btn bs bsm" onClick={addG}>+ Gasto real</button>
-        {["Transporte","Estibadores","Almuerzo estibadores","Almacenaje","Otros gastos"].map(t=>(
-          <button key={t} className="btn bs bsm" onClick={()=>upd("gastos",[...(c.gastos||[]),{...emptyGasto(),concepto:t}])}>{t}</button>
+        <div className="sec">Gastos del Lote <span style={{fontSize:10,color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0,marginLeft:4}}>(se distribuyen entre productos por proporción del valor)</span></div>
+        <div className="alert ai" style={{marginBottom:10,fontSize:12}}>Aquí van: importadora USD, importadora CUP, transporte, estibadores, almuerzo, aduana, etc. Marca cuáles ve la ONAT y cuáles van al costo real.</div>
+        {(c.gastos||[]).length>0&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 130px 78px 54px 54px 28px",gap:6,marginBottom:6,alignItems:"center"}}>
+            <span className="flbl">Concepto</span><span className="flbl">Monto</span><span className="flbl">Moneda</span>
+            <span className="flbl" style={{color:"var(--cup)",textAlign:"center"}}>ONAT</span>
+            <span className="flbl" style={{color:"var(--ac)",textAlign:"center"}}>Real</span>
+            <span/>
+          </div>
+        )}
+        {(c.gastos||[]).map((g)=>(
+          <div key={g.id} style={{display:"grid",gridTemplateColumns:"1fr 130px 78px 54px 54px 28px",gap:6,marginBottom:6,alignItems:"center"}}>
+            <input className="finp" value={g.concepto} onChange={e=>updGL(g.id,"concepto",e.target.value)} placeholder="Gastos importadora, Transporte..."/>
+            <input className="finp mono" type="number" step="0.01" min="0" value={g.monto} onChange={e=>updGL(g.id,"monto",e.target.value)} placeholder="0.00"/>
+            <MSel value={g.moneda} onChange={v=>updGL(g.id,"moneda",v)}/>
+            <div style={{display:"flex",justifyContent:"center"}}><input type="checkbox" checked={!!g.enOnat} onChange={e=>updGL(g.id,"enOnat",e.target.checked)} style={{width:16,height:16,accentColor:"var(--cup)",cursor:"pointer"}}/></div>
+            <div style={{display:"flex",justifyContent:"center"}}><input type="checkbox" checked={!!g.enReal} onChange={e=>updGL(g.id,"enReal",e.target.checked)} style={{width:16,height:16,accentColor:"var(--ac)",cursor:"pointer"}}/></div>
+            <button className="btn bd2 bsm" style={{padding:"3px 6px"}} onClick={()=>delGL(g.id)}>✕</button>
+          </div>
         ))}
-      </div>
-
-      <div className="sec">Productos del Lote</div>
-      {(c.productos||[]).length===0&&<div className="alert aw">Agrega al menos un producto.</div>}
-      {(c.productos||[]).map((p,pi)=>(
-        <div key={p.id} className="pc">
-          <div className="ph"><span className="pnum">Producto #{pi+1}</span><button className="btn bd2 bsm" onClick={()=>delP(p.id)}>✕ Eliminar</button></div>
-          <div className="fg g4" style={{marginBottom:12}}>
-            <div className="fgrp"><label className="flbl">Nombre *</label><input className="finp" value={p.nombre} onChange={e=>updP(p.id,"nombre",e.target.value)} placeholder="Ej: Huevos blancos"/></div>
-            <div className="fgrp"><label className="flbl">Código</label><input className="finp mono" value={p.codigo||""} onChange={e=>updP(p.id,"codigo",e.target.value)} placeholder="SKU-001"/></div>
-            <div className="fgrp"><label className="flbl">Precio factura</label>
-              <div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.0001" min="0" value={p.precioFactura} onChange={e=>updP(p.id,"precioFactura",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={p.monedaPrecio} onChange={v=>updP(p.id,"monedaPrecio",v)} style={{width:78}}/></div>
-            </div>
-            <div className="fgrp"><label className="flbl">El precio es...</label>
-              <select className="fsel" value={p.tipoPrecio} onChange={e=>updP(p.id,"tipoPrecio",e.target.value)}>
-                <option value="total">Total del producto</option><option value="unit">Por unidad base</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{fontSize:11,fontWeight:700,color:"var(--tx2)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>
-            Estructura de empaque
-            <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0,marginLeft:8}}>Nivel 1=unidad base, luego niveles superiores</span>
-          </div>
-          {(p.niveles||[]).length===0&&<div className="alert ai" style={{marginBottom:8}}>Ej huevos: Nivel 1=Huevo(302400 total) → Nivel 2=Cartón(12 por cartón) → Nivel 3=Caja(30 cartones por caja)</div>}
-          {(p.niveles||[]).map((n,ni)=>(
-            <div key={n.id} className="ng">
-              <div className="fgrp">{ni===0&&<label className="flbl">Nombre nivel</label>}<input className="finp" value={n.nombre} onChange={e=>updN(p.id,n.id,"nombre",e.target.value)} placeholder={ni===0?"Huevo, Kg...":"Cartón, Caja..."}/></div>
-              <div className="fgrp">
-                {ni===0&&<label className="flbl">Cantidad total en lote</label>}
-                {ni===0?<input className="finp mono" type="number" min="0" value={n.total||""} onChange={e=>updN(p.id,n.id,"total",e.target.value)} placeholder="302400"/>
-                :<div style={{height:38,display:"flex",alignItems:"center",fontSize:11,color:"var(--tx3)",paddingLeft:4}}>Calculado automático</div>}
-              </div>
-              <div className="fgrp">{ni===0&&<label className="flbl">Unidad</label>}<input className="finp" value={n.unidad||""} onChange={e=>updN(p.id,n.id,"unidad",e.target.value)} placeholder={ni===0?"u, kg, L":"cartones..."}/></div>
-              <div className="fgrp">
-                {ni===0&&<label className="flbl">— (nivel base)</label>}
-                {ni===0?<div style={{height:38,display:"flex",alignItems:"center",fontSize:11,color:"var(--tx3)",paddingLeft:4}}>Nivel base</div>
-                :<input className="finp mono" type="number" min="1" value={n.porNivelAnterior||""} onChange={e=>updN(p.id,n.id,"porNivelAnterior",e.target.value)} placeholder={"# por "+((p.niveles||[])[ni-1]?.nombre||"nivel ant.")}/>}
-              </div>
-              <button className="btn bd2 bsm" style={{marginTop:ni===0?20:0}} onClick={()=>delN(p.id,n.id)}>✕</button>
-            </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+          <button className="btn bs bsm" onClick={addGL}>+ Gasto</button>
+          {[
+            {t:"Gastos importadora USD",m:"USD",o:true,r:true},
+            {t:"Gastos importadora CUP",m:"CUP",o:true,r:true},
+            {t:"Transporte",m:"USD",o:false,r:true},
+            {t:"Estibadores",m:"CUP",o:false,r:true},
+            {t:"Almuerzo estibadores",m:"CUP",o:false,r:true},
+            {t:"Derechos de aduana",m:"USD",o:false,r:true},
+            {t:"Gastos de puerto",m:"USD",o:false,r:true},
+            {t:"Agente aduanal",m:"USD",o:false,r:true},
+          ].map(({t,m,o,r})=>(
+            <button key={t} className="btn bs bsm"
+              style={{borderColor:o&&r?"var(--bd2)":o?"rgba(167,139,250,.4)":"rgba(79,142,247,.4)",
+                      color:o&&r?"var(--tx2)":o?"var(--cup)":"var(--ac)"}}
+              onClick={()=>setC(p=>({...p,gastos:[...(p.gastos||[]),{...emptyGastoLote(),concepto:t,moneda:m,enOnat:o,enReal:r}]}))}>
+              {t}
+            </button>
           ))}
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-            {(p.niveles||[]).length===0&&<><button className="btn bs bsm" onClick={()=>addN(p.id)}>+ Unidad base</button>
-              {["Huevo","Kg","Litro","Unidad","Lata","Botella"].map(t=><button key={t} className="btn bs bsm" onClick={()=>updP(p.id,"niveles",[{id:uid(),nombre:t,unidad:t==="Kg"?"kg":t==="Litro"?"L":"u",total:"",porNivelAnterior:""}])}>{t}</button>)}</>}
-            {(p.niveles||[]).length>0&&<button className="btn bs bsm" onClick={()=>addN(p.id)}>+ Nivel superior</button>}
-          </div>
-
-          <div style={{fontSize:11,fontWeight:700,color:"var(--ac2)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>
-            Gastos del producto
-            <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0,marginLeft:8}}>— marca si va en ficha ONAT, Real o ambas</span>
-          </div>
-          <div className="alert ai" style={{marginBottom:8}}>
-            Importadora USD/CUP: marca ambas. Transporte, estibadores: marca según corresponda.
-          </div>
-          {(p.gastos||[]).length>0&&(
-            <div style={{display:"grid",gridTemplateColumns:"1fr 130px 78px 60px 60px 28px",gap:6,marginBottom:6,alignItems:"center"}}>
-              <span className="flbl">Concepto</span>
-              <span className="flbl">Monto</span>
-              <span className="flbl">Moneda</span>
-              <span className="flbl" style={{color:"var(--cup)",textAlign:"center"}}>ONAT</span>
-              <span className="flbl" style={{color:"var(--ac)",textAlign:"center"}}>Real</span>
-              <span/>
-            </div>
-          )}
-          {(p.gastos||[]).map((g,gi)=>(
-            <div key={g.id} style={{display:"grid",gridTemplateColumns:"1fr 130px 78px 60px 60px 28px",gap:6,marginBottom:6,alignItems:"center"}}>
-              <input className="finp" value={g.concepto} onChange={e=>updGP(p.id,g.id,"concepto",e.target.value)} placeholder="Gastos importadora USD, Transporte..."/>
-              <input className="finp mono" type="number" step="0.01" min="0" value={g.monto} onChange={e=>updGP(p.id,g.id,"monto",e.target.value)} placeholder="0.00"/>
-              <MSel value={g.moneda} onChange={v=>updGP(p.id,g.id,"moneda",v)}/>
-              <div style={{display:"flex",justifyContent:"center",alignItems:"center"}}>
-                <input type="checkbox" checked={!!g.enOnat} onChange={e=>updGP(p.id,g.id,"enOnat",e.target.checked)}
-                  style={{width:16,height:16,accentColor:"var(--cup)",cursor:"pointer"}}/>
-              </div>
-              <div style={{display:"flex",justifyContent:"center",alignItems:"center"}}>
-                <input type="checkbox" checked={!!g.enReal} onChange={e=>updGP(p.id,g.id,"enReal",e.target.checked)}
-                  style={{width:16,height:16,accentColor:"var(--ac)",cursor:"pointer"}}/>
-              </div>
-              <button className="btn bd2 bsm" style={{padding:"3px 6px"}} onClick={()=>delGP(p.id,g.id)}>✕</button>
-            </div>
-          ))}
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-            <button className="btn bs bsm" onClick={()=>addGP(p.id)}>+ Gasto</button>
-            {[
-              {t:"Gastos importadora USD",m:"USD",o:true,r:true},
-              {t:"Gastos importadora CUP",m:"CUP",o:true,r:true},
-              {t:"Transporte",m:"USD",o:false,r:true},
-              {t:"Estibadores",m:"CUP",o:false,r:true},
-              {t:"Almuerzo estibadores",m:"CUP",o:false,r:true},
-            ].map(({t,m,o,r})=>(
-              <button key={t} className="btn bs bsm"
-                style={{borderColor:o&&r?"var(--bd2)":o?"rgba(167,139,250,.4)":"rgba(79,142,247,.4)",
-                        color:o&&r?"var(--tx2)":o?"var(--cup)":"var(--ac)"}}
-                onClick={()=>upd("productos",c.productos.map(pr=>pr.id===p.id?{...pr,gastos:[...(pr.gastos||[]),{...emptyGastoP(),concepto:t,moneda:m,enOnat:o,enReal:r}]}:pr))}>
-                {t}
-              </button>
-            ))}
-          </div>
-
-          <div style={{fontSize:11,fontWeight:700,color:"var(--ac)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:8}}>Precios de Venta (por unidad base)</div>
-          <div className="fg g2">
-            <div className="fgrp"><label className="flbl">🧾 PV ONAT <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0}}>(para cálculo de impuestos)</span></label>
-              <div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.0001" min="0" value={p.pvOnat||""} onChange={e=>updP(p.id,"pvOnat",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={p.monedaPvOnat} onChange={v=>updP(p.id,"monedaPvOnat",v)} style={{width:78}}/></div>
-            </div>
-            <div className="fgrp"><label className="flbl">💰 PV Real <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0}}>(tu precio real al cliente)</span></label>
-              <div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.0001" min="0" value={p.pvReal||""} onChange={e=>updP(p.id,"pvReal",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={p.monedaPvReal} onChange={v=>updP(p.id,"monedaPvReal",v)} style={{width:78}}/></div>
-            </div>
-          </div>
-          <div className="fgrp" style={{marginTop:8}}><label className="flbl">Notas</label><input className="finp" value={p.notas||""} onChange={e=>updP(p.id,"notas",e.target.value)} placeholder="Observaciones..."/></div>
         </div>
-      ))}
-      <button className="btn bp bsm" onClick={addP} style={{marginBottom:16}}>+ Agregar producto</button>
 
-      <div className="sec">Notas del Lote</div>
-      <textarea className="ftxt" value={c.notas||""} onChange={e=>upd("notas",e.target.value)} placeholder="Número de BL, factura, observaciones..." style={{marginBottom:16}}/>
+        <div className="sec">Productos del Lote</div>
+        {(c.productos||[]).length===0&&<div className="alert aw">Agrega al menos un producto.</div>}
+        {(c.productos||[]).map((p,pi)=>(
+          <div key={p.id} className="pc">
+            <div className="ph"><span className="pnum">Producto #{pi+1}</span><button className="btn bd2 bsm" onClick={()=>delP(p.id)}>✕ Eliminar</button></div>
+            <div className="fg g4" style={{marginBottom:12}}>
+              <div className="fgrp"><label className="flbl">Nombre *</label><input className="finp" value={p.nombre} onChange={e=>updP(p.id,"nombre",e.target.value)} placeholder="Ej: Huevos blancos"/></div>
+              <div className="fgrp"><label className="flbl">Código</label><input className="finp mono" value={p.codigo||""} onChange={e=>updP(p.id,"codigo",e.target.value)} placeholder="SKU-001"/></div>
+              <div className="fgrp"><label className="flbl">Precio factura</label>
+                <div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.0001" min="0" value={p.precioFactura} onChange={e=>updP(p.id,"precioFactura",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={p.monedaPrecio} onChange={v=>updP(p.id,"monedaPrecio",v)} style={{width:78}}/></div>
+              </div>
+              <div className="fgrp"><label className="flbl">El precio es...</label>
+                <select className="fsel" value={p.tipoPrecio} onChange={e=>updP(p.id,"tipoPrecio",e.target.value)}>
+                  <option value="total">Total del producto</option><option value="unit">Por unidad base</option>
+                </select>
+              </div>
+            </div>
 
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <button className="btn bs" onClick={onClose}>Cancelar</button>
-        <button className="btn bp" onClick={()=>onSave(c)} disabled={!isValid}>💾 Guardar</button>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--tx2)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>
+              Estructura de empaque
+              <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0,marginLeft:8}}>Nivel 1 = unidad base → niveles superiores</span>
+            </div>
+            {(p.niveles||[]).length===0&&<div className="alert ai" style={{marginBottom:8,fontSize:12}}>Ej: Nivel 1=Huevo (302,400 total) → Nivel 2=Cartón (12 por cartón) → Nivel 3=Caja (30 cartones por caja)</div>}
+            {(p.niveles||[]).map((n,ni)=>(
+              <div key={n.id} className="ng">
+                <div className="fgrp">{ni===0&&<label className="flbl">Nombre nivel</label>}<input className="finp" value={n.nombre||""} onChange={e=>updN(p.id,n.id,"nombre",e.target.value)} placeholder={ni===0?"Huevo, Kg...":"Cartón, Caja..."}/></div>
+                <div className="fgrp">
+                  {ni===0&&<label className="flbl">Cantidad total</label>}
+                  {ni===0?<input className="finp mono" type="number" min="0" value={n.total||""} onChange={e=>updN(p.id,n.id,"total",e.target.value)} placeholder="302400"/>
+                  :<div style={{height:38,display:"flex",alignItems:"center",fontSize:11,color:"var(--tx3)",paddingLeft:4}}>Se calcula automático</div>}
+                </div>
+                <div className="fgrp">{ni===0&&<label className="flbl">Unidad</label>}<input className="finp" value={n.unidad||""} onChange={e=>updN(p.id,n.id,"unidad",e.target.value)} placeholder={ni===0?"u, kg, L":"cartones..."}/></div>
+                <div className="fgrp">
+                  {ni===0&&<label className="flbl">— (nivel base)</label>}
+                  {ni===0?<div style={{height:38,display:"flex",alignItems:"center",fontSize:11,color:"var(--tx3)",paddingLeft:4}}>Nivel base</div>
+                  :<input className="finp mono" type="number" min="1" value={n.porNivelAnterior||""} onChange={e=>updN(p.id,n.id,"porNivelAnterior",e.target.value)} placeholder={"# por "+((p.niveles||[])[ni-1]?.nombre||"nivel ant.")}/>}
+                </div>
+                <button className="btn bd2 bsm" style={{marginTop:ni===0?20:0}} onClick={()=>delN(p.id,n.id)}>✕</button>
+              </div>
+            ))}
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+              {(p.niveles||[]).length===0&&<>
+                <button className="btn bs bsm" onClick={()=>addN(p.id)}>+ Unidad base</button>
+                {["Huevo","Kg","Litro","Unidad","Lata","Botella","Saco"].map(t=>(
+                  <button key={t} className="btn bs bsm" onClick={()=>updP(p.id,"niveles",[{id:uid(),nombre:t,unidad:t==="Kg"?"kg":t==="Litro"?"L":t==="Saco"?"kg":"u",total:"",porNivelAnterior:""}])}>{t}</button>
+                ))}
+              </>}
+              {(p.niveles||[]).length>0&&<button className="btn bs bsm" onClick={()=>addN(p.id)}>+ Nivel superior</button>}
+            </div>
+
+            <div style={{fontSize:11,fontWeight:700,color:"var(--ac3)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}}>
+              Gastos específicos del producto
+              <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0,marginLeft:8}}>(solo este producto, solo van a ficha Real)</span>
+            </div>
+            {(p.gastosEsp||[]).map((g)=>(
+              <div key={g.id} style={{display:"grid",gridTemplateColumns:"1fr 130px 78px 28px",gap:6,marginBottom:6,alignItems:"center"}}>
+                <input className="finp" value={g.concepto} onChange={e=>updGP(p.id,g.id,"concepto",e.target.value)} placeholder="Etiquetado especial, empaque adicional..."/>
+                <input className="finp mono" type="number" step="0.01" min="0" value={g.monto} onChange={e=>updGP(p.id,g.id,"monto",e.target.value)} placeholder="0.00"/>
+                <MSel value={g.moneda} onChange={v=>updGP(p.id,g.id,"moneda",v)}/>
+                <button className="btn bd2 bsm" style={{padding:"3px 6px"}} onClick={()=>delGP(p.id,g.id)}>✕</button>
+              </div>
+            ))}
+            <div style={{display:"flex",gap:6,marginBottom:14}}>
+              <button className="btn bs bsm" onClick={()=>addGP(p.id)}>+ Gasto específico</button>
+            </div>
+
+            <div style={{fontSize:11,fontWeight:700,color:"var(--ac)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:8}}>Precios de Venta (por unidad base: {(p.niveles||[])[0]?.nombre||"unidad"})</div>
+            <div className="fg g2">
+              <div className="fgrp"><label className="flbl">🧾 PV ONAT <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0}}>(para cálculo de impuestos)</span></label>
+                <div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.0001" min="0" value={p.pvOnat||""} onChange={e=>updP(p.id,"pvOnat",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={p.monedaPvOnat} onChange={v=>updP(p.id,"monedaPvOnat",v)} style={{width:78}}/></div>
+              </div>
+              <div className="fgrp"><label className="flbl">💰 PV Real <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0}}>(tu precio real al cliente)</span></label>
+                <div style={{display:"flex",gap:6}}><input className="finp mono" type="number" step="0.0001" min="0" value={p.pvReal||""} onChange={e=>updP(p.id,"pvReal",e.target.value)} placeholder="0.00" style={{flex:1}}/><MSel value={p.monedaPvReal} onChange={v=>updP(p.id,"monedaPvReal",v)} style={{width:78}}/></div>
+              </div>
+            </div>
+            <div className="fgrp" style={{marginTop:8}}><label className="flbl">Notas</label><input className="finp" value={p.notas||""} onChange={e=>updP(p.id,"notas",e.target.value)} placeholder="Observaciones..."/></div>
+          </div>
+        ))}
+        <button className="btn bp bsm" onClick={addP} style={{marginBottom:16}}>+ Agregar producto</button>
+
+        <div className="sec">Notas del Lote</div>
+        <textarea className="ftxt" value={c.notas||""} onChange={e=>upd("notas",e.target.value)} placeholder="Número de BL, factura, observaciones..." style={{marginBottom:16}}/>
+
+        {lote.costoTotalUSD>0&&(
+          <div style={{background:"var(--sf2)",border:"1px solid var(--bd)",borderRadius:10,padding:14,marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--ac)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Vista previa — Costo total del lote</div>
+            {[["Valor mercancía",lote.valorMercUSD],["Flete",lote.fleteUSD],["THCD",lote.thcdUSD],["Seguro",lote.seguroUSD],["Gastos reales lote",lote.gastosLoteRealUSD]].map(([l,v])=>v>0&&(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid var(--bd)",fontSize:13}}>
+                <span style={{color:"var(--tx2)"}}>{l}</span>
+                <span style={{fontFamily:"monospace",color:"var(--usd)"}}>$ {fmt(v,2)}</span>
+              </div>
+            ))}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0 0",fontWeight:700,fontSize:14}}>
+              <span>COSTO TOTAL</span><span style={{fontFamily:"monospace",color:"var(--usd)"}}>$ {fmt(lote.costoTotalUSD,2)}</span>
+            </div>
+          </div>
+        )}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button className="btn bs" onClick={onClose}>Cancelar</button>
+          <button className="btn bp" onClick={()=>onSave(c)} disabled={!isValid}>💾 Guardar</button>
+        </div>
       </div>
     </div>
-  </div>);
+  );
 }
 
-// ── HELPERS DISPLAY ──
-const ValUSD=({v,small=false})=>(
-  <span>
-    <span className="fval-main" style={{color:"var(--usd)",fontSize:small?"12px":"14px"}}>$ {fmt(v,4)}</span>
-  </span>
-);
-const ValCUP=({v,rates,small=false})=>(
-  <span>
-    <span className="fval-main" style={{color:"var(--cup)",fontSize:small?"12px":"14px"}}>{fmt(v,2)} CUP</span>
-    {!small&&<span className="fval-sec">≈ $ {fmt(v/rates.mercado,4)}</span>}
-  </span>
-);
-
-// ── FICHAS PARALELAS por producto ──
-function FichasProducto({p,c,rates,calcCont}){
-  const pCalc=calcProducto(p,c,rates,calcCont);
-  const nivelesCalc=calcNiveles(p.niveles||[],pCalc.costoRealUnitUSD);
+// ── FICHAS PRODUCTO (vista detalle) ──
+function FichasProducto({p,c,rates,lote}){
+  const pCalc=calcProducto(p,c,rates,lote);
+  const nivelesReal=calcNiveles(p.niveles||[],pCalc.costoRealUnitUSD);
   const nivelesOnat=calcNiveles(p.niveles||[],pCalc.costoOnatUnitCUP);
   const pvOnatCUP=toCUPonat(p.pvOnat||0,p.monedaPvOnat,rates);
   const pvRealUSD=toUSD(p.pvReal||0,p.monedaPvReal,rates);
-  // impuestos por unidad base
-  const imp11unit=pvOnatCUP>0?pvOnatCUP*0.11:0;
-  const utilOnatUnit=pvOnatCUP>0?pvOnatCUP-pCalc.costoOnatUnitCUP:0;
-  const imp35unit=utilOnatUnit>0?utilOnatUnit*0.35:0;
-  const totImpCUP=imp11unit+imp35unit;
-  const totImpUSD=totImpCUP/rates.mercado;
+  const imp=calcImpuestos(pvOnatCUP,pCalc.costoOnatUnitCUP);
+  const totImpUSD=imp.totalImpCUP/rates.mercado;
+  const rentUnit=pvRealUSD>0?calcRentabilidad(pCalc.costoRealUnitUSD,pvRealUSD,totImpUSD):null;
+  const rentLote=pvRealUSD>0?calcRentabilidad(pCalc.costoRealTotalUSD,pvRealUSD*pCalc.cantBase,totImpUSD*pCalc.cantBase):null;
 
   return(
     <div className="card">
@@ -515,169 +626,161 @@ function FichasProducto({p,c,rates,calcCont}){
         {p.codigo&&<span className="tag">{p.codigo}</span>}
         <span className="tag">Prop. {fmt(pCalc.prop*100,1)}% del lote</span>
         <span className="tag">{fmt(pCalc.cantBase,0)} {(p.niveles||[])[0]?.nombre||"u"} totales</span>
-        {totImpUSD>0&&<span className="tag" style={{background:"rgba(247,111,79,.1)",borderColor:"rgba(247,111,79,.3)",color:"var(--ac4)"}}>Imp. tot: $ {fmt(totImpUSD,2)} / {fmt(totImpCUP,2)} CUP</span>}
+        {totImpUSD>0&&<span className="tag" style={{background:"rgba(247,111,79,.1)",borderColor:"rgba(247,111,79,.3)",color:"var(--ac4)"}}>
+          Imp. lote: $ {fmt(totImpUSD*pCalc.cantBase,2)} / {fmt(imp.totalImpCUP*pCalc.cantBase,2)} CUP
+        </span>}
       </div>
 
-      {/* TABLA NIVELES - COSTOS */}
-      {nivelesCalc.length>0&&(
+      {nivelesReal.length>0&&(
         <div style={{marginBottom:16}}>
           <div style={{fontSize:11,fontWeight:700,color:"var(--tx2)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:8}}>Costo por nivel de empaque</div>
           <div className="tw">
             <table className="niv-table">
               <thead><tr>
-                <th>Nivel</th>
-                <th>= Unid. base</th>
-                <th>Cant. en lote</th>
-                <th style={{color:"var(--usd)"}}>Costo REAL / u (USD)</th>
+                <th>Nivel</th><th>= Unid. base</th><th>Cant. en lote</th>
+                <th style={{color:"var(--usd)"}}>Costo Real / u (USD)</th>
                 <th style={{color:"var(--tx3)"}}>CUP merc.</th>
                 <th style={{color:"var(--cup)"}}>Costo ONAT / u (CUP)</th>
                 <th style={{color:"var(--tx3)"}}>≈ USD</th>
               </tr></thead>
-              <tbody>
-                {nivelesCalc.map((n,ni)=>{
-                  const no=nivelesOnat[ni];
-                  const cantTot=ni===0?pCalc.cantBase:Math.round(pCalc.cantBase/n.unidadesBase);
-                  return(<tr key={n.id} className={ni===0?"niv-tot":""}>
-                    <td><b>{n.nombre||"Nivel "+(ni+1)}</b>{ni===0&&<span className="tag" style={{marginLeft:6,fontSize:9}}>BASE</span>}</td>
-                    <td className="tm">{ni===0?"1":fmt(n.unidadesBase,0)}</td>
-                    <td className="tm">{fmt(cantTot,0)} {n.unidad}</td>
-                    <td className="tusd">$ {fmt(n.costoUSD,4)}</td>
-                    <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{fmt(n.costoUSD*rates.mercado,2)}</td>
-                    <td className="tcup">{no?fmt(no.costoUSD,2):"-"} CUP</td>
-                    <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{no?"≈ $"+fmt(no.costoUSD/rates.mercado,4):"-"}</td>
-                  </tr>);
-                })}
-              </tbody>
+              <tbody>{nivelesReal.map((n,ni)=>{
+                const no=nivelesOnat[ni];
+                const cantTot=ni===0?pCalc.cantBase:Math.round(pCalc.cantBase/(n.unidadesBase||1));
+                return(<tr key={n.id} className={ni===0?"niv-tot":""}>
+                  <td><b>{n.nombre||"Nivel "+(ni+1)}</b>{ni===0&&<span className="tag" style={{marginLeft:6,fontSize:9}}>BASE</span>}</td>
+                  <td className="tm">{ni===0?"1":fmt(n.unidadesBase,0)}</td>
+                  <td className="tm">{fmt(cantTot,0)} {n.unidad}</td>
+                  <td className="tusd">$ {fmt(n.costo,4)}</td>
+                  <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{fmt(n.costo*rates.mercado,2)}</td>
+                  <td className="tcup">{no?fmt(no.costo,2):"-"} CUP</td>
+                  <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{no?"≈ $"+fmt(no.costo/rates.mercado,4):"-"}</td>
+                </tr>);
+              })}</tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* FICHAS PARALELAS */}
       <div className="fichas-grid">
-
         {/* FICHA ONAT */}
         <div className="ficha-onat">
           <div className="ficha-title ft-onat">🧾 Ficha ONAT</div>
-          <div className="frow sub"><span className="flbl2">CIF proporcional</span><ValCUP v={pCalc.cifOnatCUP} rates={rates}/></div>
-          {(p.gastos||[]).filter(g=>g.enOnat).map(g=>{
-            const cv=toUSD(g.monto,g.moneda,rates)*rates.onat;
-            return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto ONAT"}</span><ValCUP v={cv} rates={rates}/></div>);
+          <div className="frow sub"><span className="flbl2">CIF proporcional (base)</span>
+            <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pCalc.cifOnatCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.cifOnatCUP/rates.mercado,4)}</span></span>
+          </div>
+          {(c.gastos||[]).filter(g=>g.enOnat).map(g=>{
+            const v=toUSD(g.monto,g.moneda,rates)*rates.onat*pCalc.prop;
+            return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto ONAT"}</span>
+              <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(v,2)} CUP</span><span className="fval-sec">≈ $ {fmt(v/rates.mercado,4)}</span></span>
+            </div>);
           })}
-          <div className="frow ftot"><span style={{color:"var(--cup)"}}>Costo Total ONAT</span><ValCUP v={pCalc.costoOnatTotalCUP} rates={rates}/></div>
-          <div className="frow sub"><span className="flbl2">Costo unit. ONAT</span><ValCUP v={pCalc.costoOnatUnitCUP} rates={rates}/></div>
-
-          {pvOnatCUP>0?(
-            <>
-              <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
-              <div className="frow sub"><span className="flbl2">PV ONAT / unidad</span><ValCUP v={pvOnatCUP} rates={rates}/></div>
-              <div className="frow sub"><span className="flbl2">Utilidad ONAT / unidad</span>
-                <span className="fval-main" style={{color:pvOnatCUP-pCalc.costoOnatUnitCUP>=0?"var(--ac2)":"var(--ac4)",fontSize:14}}>
-                  {pvOnatCUP-pCalc.costoOnatUnitCUP>=0?"+":""}{fmt(pvOnatCUP-pCalc.costoOnatUnitCUP,2)} CUP
-                </span>
-              </div>
-              <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--ac4)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Impuestos ONAT / unidad</div>
-              <div className="frow sub"><span className="flbl2">11% sobre ventas ONAT</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp11unit,2)} CUP</span></div>
-              <div className="frow sub"><span className="flbl2">Utilidad ONAT</span><span className="fval-main" style={{color:utilOnatUnit>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{utilOnatUnit>=0?"+":""}{fmt(utilOnatUnit,2)} CUP</span></div>
-              <div className="frow sub"><span className="flbl2">35% sobre utilidad ONAT</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp35unit,2)} CUP</span></div>
-              <div className="frow ftot" style={{borderTopColor:"var(--ac4)"}}><span style={{color:"var(--ac4)"}}>Total impuestos / unidad</span>
-                <span>
-                  <span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(totImpCUP,2)} CUP</span>
-                  <span className="fval-sec">≈ $ {fmt(totImpUSD,4)}</span>
-                </span>
-              </div>
-              {/* Totales del lote */}
-              <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
-              <div style={{fontSize:10,color:"var(--tx3)",marginBottom:4}}>TOTAL LOTE ({fmt(pCalc.cantBase,0)} {(p.niveles||[])[0]?.nombre||"u"})</div>
-              {(()=>{
-                const totVta=pvOnatCUP*pCalc.cantBase;
-                const totCosto=pCalc.costoOnatTotalCUP;
-                const totUtil=totVta-totCosto;
-                const tot11=totVta*0.11;
-                const tot35=totUtil>0?totUtil*0.35:0;
-                const totImpCUPLote=tot11+tot35;
-                return(<>
-                  <div className="frow sub"><span className="flbl2">Total ventas ONAT</span><span className="fval-main" style={{color:"var(--cup)",fontSize:12}}>{fmt(totVta,2)} CUP</span></div>
-                  <div className="frow sub"><span className="flbl2">Impuesto 11%</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:12}}>{fmt(tot11,2)} CUP</span></div>
-                  <div className="frow sub"><span className="flbl2">Impuesto 35%</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:12}}>{fmt(tot35,2)} CUP</span></div>
-                  <div className="frow ftot" style={{borderTopColor:"var(--ac4)"}}><span style={{color:"var(--ac4)"}}>TOTAL IMPUESTOS LOTE</span>
-                    <span><span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(totImpCUPLote,2)} CUP</span><span className="fval-sec">≈ $ {fmt(totImpCUPLote/rates.mercado,2)}</span></span>
-                  </div>
-                </>);
-              })()}
-            </>
-          ):(
-            <div className="alert ai" style={{marginTop:10,fontSize:12}}>Agrega el PV ONAT para ver el cálculo de impuestos.</div>
+          <div className="frow ftot"><span style={{color:"var(--cup)"}}>Costo Total ONAT</span>
+            <span><span className="fval-main" style={{color:"var(--cup)"}}>{fmt(pCalc.costoOnatTotalCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.costoOnatTotalUSD,4)}</span></span>
+          </div>
+          <div className="frow sub"><span className="flbl2">Costo unitario ONAT</span>
+            <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pCalc.costoOnatUnitCUP,4)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.costoOnatUnitUSD,4)}</span></span>
+          </div>
+          {pvOnatCUP>0?(<>
+            <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
+            <div className="frow sub"><span className="flbl2">PV ONAT / unidad</span>
+              <span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pvOnatCUP,4)} CUP</span>
+            </div>
+            <div className="frow sub"><span className="flbl2">Utilidad ONAT / unidad</span>
+              <span className="fval-main" style={{color:imp.utilOnat>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{imp.utilOnat>=0?"+":""}{fmt(imp.utilOnat,4)} CUP</span>
+            </div>
+            <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--ac4)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Impuestos ONAT / unidad</div>
+            <div className="frow sub"><span className="flbl2">11% sobre ventas</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp11,4)} CUP</span></div>
+            <div className="frow sub"><span className="flbl2">35% sobre utilidad</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp35,4)} CUP</span></div>
+            <div className="frow ftot" style={{borderTopColor:"var(--ac4)"}}><span style={{color:"var(--ac4)"}}>Total impuestos / unidad</span>
+              <span><span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(imp.totalImpCUP,4)} CUP</span><span className="fval-sec">≈ $ {fmt(totImpUSD,4)}</span></span>
+            </div>
+            <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
+            <div style={{fontSize:10,color:"var(--tx3)",marginBottom:4}}>TOTAL LOTE ({fmt(pCalc.cantBase,0)} {(p.niveles||[])[0]?.nombre||"u"})</div>
+            {(()=>{
+              const totVta=pvOnatCUP*pCalc.cantBase;
+              const totCosto=pCalc.costoOnatTotalCUP;
+              const totUtil=totVta-totCosto;
+              const tot11=totVta*0.11;
+              const tot35=totUtil>0?totUtil*0.35:0;
+              const totImpL=tot11+tot35;
+              return(<>
+                <div className="frow sub"><span className="flbl2">Ventas ONAT totales</span><span className="fval-main" style={{color:"var(--cup)",fontSize:12}}>{fmt(totVta,2)} CUP</span></div>
+                <div className="frow sub"><span className="flbl2">Impuesto 11%</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:12}}>{fmt(tot11,2)} CUP</span></div>
+                <div className="frow sub"><span className="flbl2">Impuesto 35%</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:12}}>{fmt(tot35,2)} CUP</span></div>
+                <div className="frow ftot" style={{borderTopColor:"var(--ac4)"}}><span style={{color:"var(--ac4)"}}>TOTAL IMPUESTOS LOTE</span>
+                  <span><span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(totImpL,2)} CUP</span><span className="fval-sec">≈ $ {fmt(totImpL/rates.mercado,2)}</span></span>
+                </div>
+              </>);
+            })()}
+          </>):(
+            <div className="alert ai" style={{marginTop:10,fontSize:12}}>Agrega el PV ONAT para calcular impuestos.</div>
           )}
         </div>
 
         {/* FICHA REAL */}
         <div className="ficha-real">
           <div className="ficha-title ft-real">💰 Ficha Real</div>
-          <div className="frow sub"><span className="flbl2">Valor mercancía</span><ValUSD v={pCalc.precioMercUSD}/></div>
-          {pCalc.fleteR>0&&<div className="frow sub"><span className="flbl2">Flete prop.</span><ValUSD v={pCalc.fleteR}/></div>}
-          {pCalc.thcdR>0&&<div className="frow sub"><span className="flbl2">THCD prop.</span><ValUSD v={pCalc.thcdR}/></div>}
-          {pCalc.seguroR>0&&<div className="frow sub"><span className="flbl2">Seguro prop.</span><ValUSD v={pCalc.seguroR}/></div>}
-          {(p.gastos||[]).filter(g=>g.enReal).map(g=><div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto"}</span><ValUSD v={toUSD(g.monto,g.moneda,rates)}/></div>)}
-          {pCalc.gastosLoteR>0&&<div className="frow sub"><span className="flbl2">Gastos lote prop.</span><ValUSD v={pCalc.gastosLoteR}/></div>}
+          <div className="frow sub"><span className="flbl2">Valor mercancía</span><span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.precioMercUSD,4)}</span><span className="fval-sec">{fmt(pCalc.precioMercUSD*rates.mercado,2)} CUP</span></span></div>
+          {pCalc.fleteP>0&&<div className="frow sub"><span className="flbl2">Flete prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.fleteP,4)}</span></div>}
+          {pCalc.thcdP>0&&<div className="frow sub"><span className="flbl2">THCD prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.thcdP,4)}</span></div>}
+          {pCalc.seguroP>0&&<div className="frow sub"><span className="flbl2">Seguro prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.seguroP,4)}</span></div>}
+          {(c.gastos||[]).filter(g=>g.enReal).map(g=>{
+            const v=toUSD(g.monto,g.moneda,rates)*pCalc.prop;
+            return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto"} (prop.)</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(v,4)}</span></div>);
+          })}
+          {(p.gastosEsp||[]).map(g=>{
+            const v=toUSD(g.monto,g.moneda,rates);
+            return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto espec."}</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(v,4)}</span></div>);
+          })}
           <div className="frow ftot"><span style={{color:"var(--ac)"}}>Costo Total Real</span>
             <span><span className="fval-main" style={{color:"var(--usd)"}}>$ {fmt(pCalc.costoRealTotalUSD,2)}</span><span className="fval-sec">{fmt(pCalc.costoRealTotalUSD*rates.mercado,0)} CUP</span></span>
           </div>
-          <div className="frow sub"><span className="flbl2">Costo unit. real</span>
+          <div className="frow sub"><span className="flbl2">Costo unitario real</span>
             <span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.costoRealUnitUSD,4)}</span><span className="fval-sec">{fmt(pCalc.costoRealUnitUSD*rates.mercado,2)} CUP</span></span>
           </div>
-
-          {totImpUSD>0&&(
-            <>
-              <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
-              <div className="frow fimp"><span className="flbl2">− Impuestos ONAT / unidad</span>
-                <span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>$ {fmt(totImpUSD,4)}</span><span className="fval-sec">{fmt(totImpCUP,2)} CUP</span></span>
-              </div>
-              <div className="frow sub"><span className="flbl2">Costo unit. + impuestos</span>
-                <span><span className="fval-main" style={{color:"var(--ac3)",fontSize:13}}>$ {fmt(pCalc.costoRealUnitUSD+totImpUSD,4)}</span></span>
-              </div>
-            </>
-          )}
-
-          {pvRealUSD>0&&(
-            <>
-              <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
-              <div className="frow sub"><span className="flbl2">PV Real / unidad</span>
-                <span><span className="fval-main" style={{color:"var(--ac2)",fontSize:13}}>$ {fmt(pvRealUSD,4)}</span><span className="fval-sec">{fmt(pvRealUSD*rates.mercado,2)} CUP</span></span>
-              </div>
-              {(()=>{
-                const margenBrutoUSD=pvRealUSD-pCalc.costoRealUnitUSD;
-                const margenNetoUSD=margenBrutoUSD-totImpUSD;
-                const pctNeto=pvRealUSD>0?(margenNetoUSD/pvRealUSD)*100:0;
-                return(<>
-                  {totImpUSD>0&&<div className="frow sub"><span className="flbl2">Margen bruto / unidad</span><span className="fval-main" style={{color:margenBrutoUSD>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{margenBrutoUSD>=0?"+":""}$ {fmt(margenBrutoUSD,4)}</span></div>}
-                  <div className="frow ftot" style={{borderTopColor:"var(--ac2)"}}><span style={{color:"var(--ac2)"}}>Margen neto / unidad</span>
-                    <span>
-                      <span className="fval-main" style={{color:margenNetoUSD>=0?"var(--ac2)":"var(--ac4)"}}>{margenNetoUSD>=0?"+":""}$ {fmt(margenNetoUSD,4)}</span>
-                      <span className="fval-sec">{fmt(pctNeto,1)}%</span>
-                    </span>
-                  </div>
-                </>);
-              })()}
-              {/* Totales lote */}
-              <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
-              <div style={{fontSize:10,color:"var(--tx3)",marginBottom:4}}>TOTAL LOTE ({fmt(pCalc.cantBase,0)} {(p.niveles||[])[0]?.nombre||"u"})</div>
-              {(()=>{
-                const totVtaR=pvRealUSD*pCalc.cantBase;
-                const totCostoR=pCalc.costoRealTotalUSD;
-                const totImpU=totImpUSD*pCalc.cantBase;
-                const totMN=totVtaR-totCostoR-totImpU;
-                return(<>
-                  <div className="frow sub"><span className="flbl2">Total ventas reales</span><span className="fval-main" style={{color:"var(--ac2)",fontSize:12}}>$ {fmt(totVtaR,2)}</span></div>
-                  <div className="frow sub"><span className="flbl2">Total impuestos (real)</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:12}}>$ {fmt(totImpU,2)}</span></div>
-                  <div className="frow ftot" style={{borderTopColor:"var(--ac2)"}}><span style={{color:"var(--ac2)"}}>GANANCIA NETA LOTE</span>
-                    <span><span className="fval-main" style={{color:totMN>=0?"var(--ac2)":"var(--ac4)"}}>{totMN>=0?"+":""}$ {fmt(totMN,2)}</span><span className="fval-sec">{fmt(totMN*rates.mercado,0)} CUP</span></span>
-                  </div>
-                </>);
-              })()}
-            </>
-          )}
+          {totImpUSD>0&&(<>
+            <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
+            <div className="frow fimp"><span className="flbl2">− Impuestos ONAT / unidad</span>
+              <span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>$ {fmt(totImpUSD,4)}</span><span className="fval-sec">{fmt(imp.totalImpCUP,2)} CUP</span></span>
+            </div>
+            <div className="frow sub"><span className="flbl2">Costo unitario + impuestos</span>
+              <span className="fval-main" style={{color:"var(--ac3)",fontSize:13}}>$ {fmt(pCalc.costoRealUnitUSD+totImpUSD,4)}</span>
+            </div>
+          </>)}
+          {pvRealUSD>0&&(<>
+            <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
+            <div className="frow sub"><span className="flbl2">PV Real / unidad</span>
+              <span><span className="fval-main" style={{color:"var(--ac2)",fontSize:13}}>$ {fmt(pvRealUSD,4)}</span><span className="fval-sec">{fmt(pvRealUSD*rates.mercado,2)} CUP</span></span>
+            </div>
+            {(()=>{
+              const mb=pvRealUSD-pCalc.costoRealUnitUSD;
+              const mn=mb-totImpUSD;
+              return(<>
+                {totImpUSD>0&&<div className="frow sub"><span className="flbl2">Margen bruto / unidad</span><span className="fval-main" style={{color:mb>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{mb>=0?"+":""}$ {fmt(mb,4)}</span></div>}
+                <div className="frow ftot" style={{borderTopColor:"var(--ac2)"}}><span style={{color:"var(--ac2)"}}>Ganancia neta / unidad</span>
+                  <span><span className="fval-main" style={{color:mn>=0?"var(--ac2)":"var(--ac4)"}}>{mn>=0?"+":""}$ {fmt(mn,4)}</span><span className="fval-sec">{fmt(mn*rates.mercado,2)} CUP</span></span>
+                </div>
+              </>);
+            })()}
+            <IndicadoresRent rent={rentUnit} lote={false}/>
+            <div style={{height:1,background:"var(--bd)",margin:"14px 0"}}/>
+            <div style={{fontSize:10,color:"var(--tx3)",marginBottom:4}}>TOTAL LOTE ({fmt(pCalc.cantBase,0)} {(p.niveles||[])[0]?.nombre||"u"})</div>
+            {(()=>{
+              const totVR=pvRealUSD*pCalc.cantBase;
+              const totCR=pCalc.costoRealTotalUSD;
+              const totIU=totImpUSD*pCalc.cantBase;
+              const totMN=totVR-totCR-totIU;
+              return(<>
+                <div className="frow sub"><span className="flbl2">Ventas reales totales</span><span className="fval-main" style={{color:"var(--ac2)",fontSize:12}}>$ {fmt(totVR,2)}</span></div>
+                <div className="frow sub"><span className="flbl2">Impuestos totales</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:12}}>$ {fmt(totIU,2)}</span></div>
+                <div className="frow ftot" style={{borderTopColor:"var(--ac2)"}}><span style={{color:"var(--ac2)"}}>GANANCIA NETA LOTE</span>
+                  <span><span className="fval-main" style={{color:totMN>=0?"var(--ac2)":"var(--ac4)"}}>{totMN>=0?"+":""}$ {fmt(totMN,2)}</span><span className="fval-sec">{fmt(totMN*rates.mercado,0)} CUP</span></span>
+                </div>
+                <IndicadoresRent rent={rentLote} lote={true}/>
+              </>);
+            })()}
+          </>)}
           {!pvRealUSD&&<div className="alert ai" style={{marginTop:10,fontSize:12}}>Agrega el PV Real para ver el margen.</div>}
         </div>
       </div>
@@ -685,7 +788,7 @@ function FichasProducto({p,c,rates,calcCont}){
   );
 }
 
-// ── APP PRINCIPAL ──
+// ── APP ──
 function App(){
   const [pinHash,setPH]=useState(()=>sessionStorage.getItem("fc_pin")||"");
   const [storedHash,setSH]=useState(()=>localStorage.getItem("fc_pin_hash")||"");
@@ -734,21 +837,17 @@ function App(){
       <div><div className="hlogo">Almacén Mayorista</div><div className="htitle">Fichas de Costo</div></div>
       <div style={{flex:1}}/>
       <div style={{display:"flex",gap:10,alignItems:"center"}}>
-        {editR?(
-          <>
-            <input className="finp mono" style={{width:88,padding:"4px 8px",fontSize:12}} placeholder="Mercado" type="number" value={tmpR.mercado} onChange={e=>setTR(r=>({...r,mercado:e.target.value}))}/>
-            <input className="finp mono" style={{width:78,padding:"4px 8px",fontSize:12}} placeholder="ONAT" type="number" value={tmpR.onat} onChange={e=>setTR(r=>({...r,onat:e.target.value}))}/>
-            <input className="finp mono" style={{width:78,padding:"4px 8px",fontSize:12}} placeholder="EUR" type="number" value={tmpR.eurUsd} onChange={e=>setTR(r=>({...r,eurUsd:e.target.value}))}/>
-            <button className="btn bsu bsm" onClick={()=>{setRates({mercado:num(tmpR.mercado),onat:num(tmpR.onat),eurUsd:num(tmpR.eurUsd)});setER(false);}}>✓</button>
-            <button className="btn bs bsm" onClick={()=>setER(false)}>✕</button>
-          </>
-        ):(
-          <>
-            <div className="rpill"><div className="rdot" style={{background:"#a78bfa"}}/><span>Mercado</span><span className="rval">{rates.mercado}</span><button className="redit" onClick={()=>{setTR(rates);setER(true);}}>✎</button></div>
-            <div className="rpill"><div className="rdot" style={{background:"#4f8ef7"}}/><span>ONAT</span><span className="rval">{rates.onat}</span></div>
-            <div className="rpill"><div className="rdot" style={{background:"#38d9a9"}}/><span>EUR</span><span className="rval">{rates.eurUsd}</span></div>
-          </>
-        )}
+        {editR?(<>
+          <input className="finp mono" style={{width:88,padding:"4px 8px",fontSize:12}} placeholder="Mercado" type="number" value={tmpR.mercado} onChange={e=>setTR(r=>({...r,mercado:e.target.value}))}/>
+          <input className="finp mono" style={{width:78,padding:"4px 8px",fontSize:12}} placeholder="ONAT" type="number" value={tmpR.onat} onChange={e=>setTR(r=>({...r,onat:e.target.value}))}/>
+          <input className="finp mono" style={{width:78,padding:"4px 8px",fontSize:12}} placeholder="EUR" type="number" value={tmpR.eurUsd} onChange={e=>setTR(r=>({...r,eurUsd:e.target.value}))}/>
+          <button className="btn bsu bsm" onClick={()=>{setRates({mercado:num(tmpR.mercado),onat:num(tmpR.onat),eurUsd:num(tmpR.eurUsd)});setER(false);}}>✓</button>
+          <button className="btn bs bsm" onClick={()=>setER(false)}>✕</button>
+        </>):(<>
+          <div className="rpill"><div className="rdot" style={{background:"#a78bfa"}}/><span>Mercado</span><span className="rval">{rates.mercado}</span><button className="redit" onClick={()=>{setTR(rates);setER(true);}}>✎</button></div>
+          <div className="rpill"><div className="rdot" style={{background:"#4f8ef7"}}/><span>ONAT</span><span className="rval">{rates.onat}</span></div>
+          <div className="rpill"><div className="rdot" style={{background:"#38d9a9"}}/><span>EUR</span><span className="rval">{rates.eurUsd}</span></div>
+        </>)}
       </div>
       <div className="sind" style={{marginLeft:12}}>
         <div className={"sdot"+(saving?" saving":"")}/>
@@ -782,7 +881,7 @@ function App(){
               <div className="tw"><table>
                 <thead><tr><th>Código</th><th>Lote</th><th>Término</th><th>Proveedor</th><th>Fecha</th><th>Prods.</th><th>Costo Total USD</th><th>Acciones</th></tr></thead>
                 <tbody>{filtered.map(c=>{
-                  const cc=calcContenedor(c,rates);
+                  const lt=calcLote(c,rates);
                   return(<tr key={c.id} style={{cursor:"pointer"}} onClick={()=>{setSel(c);setTab("detalle");}}>
                     <td><span className="tag">{c.codigo||"-"}</span></td>
                     <td style={{fontWeight:600}}>{c.nombre}</td>
@@ -790,10 +889,10 @@ function App(){
                     <td style={{color:"var(--tx2)"}}>{c.proveedor||"-"}</td>
                     <td className="tm" style={{color:"var(--tx2)"}}>{c.fecha}</td>
                     <td><span className="tag">{(c.productos||[]).length}</span></td>
-                    <td className="tusd">$ {fmt(cc.costoTotalUSD,2)}</td>
+                    <td className="tusd">$ {fmt(lt.costoTotalUSD,2)}</td>
                     <td onClick={e=>e.stopPropagation()}>
                       <div style={{display:"flex",gap:4}}>
-                        <button className="btn bs bsm" onClick={()=>{setEditC({...c});setShowMo(true);}}>✎</button>
+                        <button className="btn bs bsm" onClick={()=>{setEditC(JSON.parse(JSON.stringify(c)));setShowMo(true);}}>✎</button>
                         <button className="btn bd2 bsm" onClick={()=>delCont(c.id)}>🗑</button>
                       </div>
                     </td>
@@ -807,7 +906,7 @@ function App(){
 
       {tab==="detalle"&&sel&&(()=>{
         const c=conts.find(x=>x.id===sel.id)||sel;
-        const cc=calcContenedor(c,rates);
+        const lote=calcLote(c,rates);
         return(<div>
           <div className="dh">
             <div className="dc">#{c.codigo||"SIN CÓDIGO"}</div>
@@ -821,20 +920,16 @@ function App(){
             </div>
           </div>
           <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-            <button className="btn bs" onClick={()=>{setEditC({...c});setShowMo(true);}}>✎ Editar</button>
+            <button className="btn bs" onClick={()=>{setEditC(JSON.parse(JSON.stringify(c)));setShowMo(true);}}>✎ Editar</button>
             <button className="btn bd2" onClick={()=>delCont(c.id)}>🗑 Eliminar</button>
           </div>
-
           <div className="srow">
-            <div className="sbox"><div className="slbl">Valor Mercancía</div><div className="sval" style={{color:"var(--usd)"}}>$ {fmt(cc.valorMercUSD,2)}</div><div className="ssub">precio factura</div></div>
-            <div className="sbox"><div className="slbl">CIF Total</div><div className="sval" style={{color:"var(--ac2)"}}>$ {fmt(cc.cifUSD,2)}</div><div className="ssub">+flete+thcd+seguro</div></div>
-            <div className="sbox"><div className="slbl">Gastos Reales</div><div className="sval" style={{color:"var(--ac3)"}}>$ {fmt(cc.gastosUSD,2)}</div><div className="ssub">tasa mercado</div></div>
-            <div className="sbox"><div className="slbl">Costo Total Real</div><div className="sval">$ {fmt(cc.costoTotalUSD,2)}</div><div className="ssub">{fmt(cc.costoTotalUSD*rates.mercado,0)} CUP</div></div>
+            <div className="sbox"><div className="slbl">Valor Mercancía</div><div className="sval" style={{color:"var(--usd)"}}>$ {fmt(lote.valorMercUSD,2)}</div><div className="ssub">precio factura</div></div>
+            <div className="sbox"><div className="slbl">CIF Total</div><div className="sval" style={{color:"var(--ac2)"}}>$ {fmt(lote.cifUSD,2)}</div><div className="ssub">+flete+thcd+seguro</div></div>
+            <div className="sbox"><div className="slbl">Gastos del Lote</div><div className="sval" style={{color:"var(--ac3)"}}>$ {fmt(lote.gastosLoteRealUSD,2)}</div><div className="ssub">a tasa mercado</div></div>
+            <div className="sbox"><div className="slbl">Costo Total Real</div><div className="sval">$ {fmt(lote.costoTotalUSD,2)}</div><div className="ssub">{fmt(lote.costoTotalUSD*rates.mercado,0)} CUP</div></div>
           </div>
-
-          {/* Productos con fichas paralelas */}
-          {(c.productos||[]).map(p=><FichasProducto key={p.id} p={p} c={c} rates={rates} calcCont={cc}/>)}
-
+          {(c.productos||[]).map(p=><FichasProducto key={p.id} p={p} c={c} rates={rates} lote={lote}/>)}
           {c.notas&&<div className="card"><div className="ctitle"><span>📝</span> Notas</div><p style={{color:"var(--tx2)",fontSize:13,lineHeight:1.6}}>{c.notas}</p></div>}
         </div>);
       })()}
@@ -843,7 +938,7 @@ function App(){
         <div style={{maxWidth:600}}>
           <div className="card">
             <div className="ctitle"><span>🔗</span> GitHub Gist</div>
-            <div className="alert ai" style={{marginBottom:12}}>Usa el mismo PAT y Gist ID de la app Estado de Resultados, o crea uno nuevo.</div>
+            <div className="alert ai" style={{marginBottom:12}}>Usa el mismo PAT y Gist ID del Estado de Resultados, o uno nuevo.</div>
             <div className="fg" style={{gap:12}}>
               <div className="fgrp"><label className="flbl">Personal Access Token</label><input className="finp mono" type="password" value={gistToken} onChange={e=>{setGT(e.target.value);localStorage.setItem("fc_gist_token",e.target.value);}} placeholder="ghp_xxxxxxxxxxxx"/></div>
               <div className="fgrp"><label className="flbl">Gist ID</label><input className="finp mono" value={gistId} onChange={e=>{setGI(e.target.value);localStorage.setItem("fc_gist_id",e.target.value);}} placeholder="ID del Gist"/></div>
@@ -865,6 +960,7 @@ function App(){
     {showMo&&editC&&<ContenedorModal inicial={editC} rates={rates} onSave={saveCont} onClose={()=>setShowMo(false)}/>}
   </div>);
 }
+
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
