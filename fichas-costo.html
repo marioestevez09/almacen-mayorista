@@ -810,11 +810,15 @@ function App(){
 
   useEffect(()=>{if(pinHash&&pinHash===storedHash)setUL(true);},[]);
   useEffect(()=>{localStorage.setItem("fc_rates",JSON.stringify(rates));},[rates]);
+  // Carga automática: se dispara cuando unlocked cambia a true O al montar si ya estaba unlocked
   useEffect(()=>{
     if(!unlocked||!gistToken||!gistId)return;
     setLoading(true);
-    loadGist(gistToken,gistId).then(d=>{if(d?.contenedores)setConts(d.contenedores);}).catch(e=>console.error(e)).finally(()=>setLoading(false));
-  },[unlocked]);
+    loadGist(gistToken,gistId)
+      .then(d=>{if(d?.contenedores)setConts(d.contenedores);})
+      .catch(e=>console.error(e))
+      .finally(()=>setLoading(false));
+  },[unlocked,gistToken,gistId]);
 
   const persist=useCallback(async(next)=>{
     setConts(next);
