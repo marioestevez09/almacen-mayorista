@@ -192,8 +192,10 @@ async function loadGist(token,gistId){
   const r=await fetch("https://api.github.com/gists/"+gistId,{headers:{Authorization:"token "+token,Accept:"application/vnd.github.v3+json"}});
   if(!r.ok)throw new Error("Error "+r.status);
   const d=await r.json();
+  // Si el archivo no existe todavía en el Gist, retorna estructura vacía
   const c=d.files["fichas-costo.json"]?.content;
-  return c?JSON.parse(c):null;
+  if(!c)return{contenedores:[]};
+  try{return JSON.parse(c);}catch(e){return{contenedores:[]};}
 }
 async function saveGist(token,gistId,payload){
   const r=await fetch("https://api.github.com/gists/"+gistId,{method:"PATCH",
@@ -815,8 +817,11 @@ function App(){
     if(!unlocked||!gistToken||!gistId)return;
     setLoading(true);
     loadGist(gistToken,gistId)
-      .then(d=>{if(d?.contenedores)setConts(d.contenedores);})
-      .catch(e=>console.error(e))
+      .then(d=>{
+        if(d?.contenedores&&d.contenedores.length>0)setConts(d.contenedores);
+        else setConts([]);
+      })
+      .catch(e=>{console.error("Error cargando Gist:",e);setSM("Error al cargar datos");})
       .finally(()=>setLoading(false));
   },[unlocked,gistToken,gistId]);
 
