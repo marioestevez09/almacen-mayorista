@@ -151,7 +151,7 @@ tr:last-child td{border-bottom:none;}
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useCallback} = React;
-const fmt=(n,d=2)=>{if(n===null||n===undefined||isNaN(n))return "0."+"0".repeat(d);return Number(n).toLocaleString("es-ES",{minimumFractionDigits:d,maximumFractionDigits:d});};
+const fmt=(n,d=2)=>{if(n===null||n===undefined||isNaN(n))return "0."+"0".repeat(d);return Number(n).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});};
 const num=v=>parseFloat(v)||0;
 const uid=()=>Math.random().toString(36).slice(2,10);
 const today=()=>new Date().toISOString().slice(0,10);
@@ -650,10 +650,10 @@ function FichasProducto({p,c,rates,lote}){
                   <td><b>{n.nombre||"Nivel "+(ni+1)}</b>{ni===0&&<span className="tag" style={{marginLeft:6,fontSize:9}}>BASE</span>}</td>
                   <td className="tm">{ni===0?"1":fmt(n.unidadesBase,0)}</td>
                   <td className="tm">{fmt(cantTot,0)} {n.unidad}</td>
-                  <td className="tusd">$ {fmt(n.costo,4)}</td>
+                  <td className="tusd">$ {fmt(n.costo,2)}</td>
                   <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{fmt(n.costo*rates.mercado,2)}</td>
                   <td className="tcup">{no?fmt(no.costo,2):"-"} CUP</td>
-                  <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{no?"≈ $"+fmt(no.costo/rates.mercado,4):"-"}</td>
+                  <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{no?"≈ $"+fmt(no.costo/rates.mercado,2):"-"}</td>
                 </tr>);
               })}</tbody>
             </table>
@@ -666,34 +666,34 @@ function FichasProducto({p,c,rates,lote}){
         <div className="ficha-onat">
           <div className="ficha-title ft-onat">🧾 Ficha ONAT</div>
           <div className="frow sub"><span className="flbl2">CIF proporcional (base)</span>
-            <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pCalc.cifOnatCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.cifOnatCUP/rates.mercado,4)}</span></span>
+            <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pCalc.cifOnatCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.cifOnatCUP/rates.mercado,2)}</span></span>
           </div>
           {(c.gastos||[]).filter(g=>g.enOnat).map(g=>{
             const v=toUSD(g.monto,g.moneda,rates)*rates.onat*pCalc.prop;
             return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto ONAT"}</span>
-              <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(v,2)} CUP</span><span className="fval-sec">≈ $ {fmt(v/rates.mercado,4)}</span></span>
+              <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(v,2)} CUP</span><span className="fval-sec">≈ $ {fmt(v/rates.mercado,2)}</span></span>
             </div>);
           })}
           <div className="frow ftot"><span style={{color:"var(--cup)"}}>Costo Total ONAT</span>
-            <span><span className="fval-main" style={{color:"var(--cup)"}}>{fmt(pCalc.costoOnatTotalCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.costoOnatTotalUSD,4)}</span></span>
+            <span><span className="fval-main" style={{color:"var(--cup)"}}>{fmt(pCalc.costoOnatTotalCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.costoOnatTotalUSD,2)}</span></span>
           </div>
           <div className="frow sub"><span className="flbl2">Costo unitario ONAT</span>
-            <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pCalc.costoOnatUnitCUP,4)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.costoOnatUnitUSD,4)}</span></span>
+            <span><span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pCalc.costoOnatUnitCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(pCalc.costoOnatUnitUSD,2)}</span></span>
           </div>
           {pvOnatCUP>0?(<>
             <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
             <div className="frow sub"><span className="flbl2">PV ONAT / unidad</span>
-              <span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pvOnatCUP,4)} CUP</span>
+              <span className="fval-main" style={{color:"var(--cup)",fontSize:13}}>{fmt(pvOnatCUP,2)} CUP</span>
             </div>
             <div className="frow sub"><span className="flbl2">Utilidad ONAT / unidad</span>
-              <span className="fval-main" style={{color:imp.utilOnat>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{imp.utilOnat>=0?"+":""}{fmt(imp.utilOnat,4)} CUP</span>
+              <span className="fval-main" style={{color:imp.utilOnat>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{imp.utilOnat>=0?"+":""}{fmt(imp.utilOnat,2)} CUP</span>
             </div>
             <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
             <div style={{fontSize:11,fontWeight:700,color:"var(--ac4)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Impuestos ONAT / unidad</div>
-            <div className="frow sub"><span className="flbl2">11% sobre ventas</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp11,4)} CUP</span></div>
-            <div className="frow sub"><span className="flbl2">35% sobre utilidad</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp35,4)} CUP</span></div>
+            <div className="frow sub"><span className="flbl2">11% sobre ventas</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp11,2)} CUP</span></div>
+            <div className="frow sub"><span className="flbl2">35% sobre utilidad</span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>{fmt(imp.imp35,2)} CUP</span></div>
             <div className="frow ftot" style={{borderTopColor:"var(--ac4)"}}><span style={{color:"var(--ac4)"}}>Total impuestos / unidad</span>
-              <span><span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(imp.totalImpCUP,4)} CUP</span><span className="fval-sec">≈ $ {fmt(totImpUSD,4)}</span></span>
+              <span><span className="fval-main" style={{color:"var(--ac4)"}}>{fmt(imp.totalImpCUP,2)} CUP</span><span className="fval-sec">≈ $ {fmt(totImpUSD,2)}</span></span>
             </div>
             <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
             <div style={{fontSize:10,color:"var(--tx3)",marginBottom:4}}>TOTAL LOTE ({fmt(pCalc.cantBase,0)} {(p.niveles||[])[0]?.nombre||"u"})</div>
@@ -721,45 +721,45 @@ function FichasProducto({p,c,rates,lote}){
         {/* FICHA REAL */}
         <div className="ficha-real">
           <div className="ficha-title ft-real">💰 Ficha Real</div>
-          <div className="frow sub"><span className="flbl2">Valor mercancía</span><span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.precioMercUSD,4)}</span><span className="fval-sec">{fmt(pCalc.precioMercUSD*rates.mercado,2)} CUP</span></span></div>
-          {pCalc.fleteP>0&&<div className="frow sub"><span className="flbl2">Flete prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.fleteP,4)}</span></div>}
-          {pCalc.thcdP>0&&<div className="frow sub"><span className="flbl2">THCD prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.thcdP,4)}</span></div>}
-          {pCalc.seguroP>0&&<div className="frow sub"><span className="flbl2">Seguro prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.seguroP,4)}</span></div>}
+          <div className="frow sub"><span className="flbl2">Valor mercancía</span><span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.precioMercUSD,2)}</span><span className="fval-sec">{fmt(pCalc.precioMercUSD*rates.mercado,2)} CUP</span></span></div>
+          {pCalc.fleteP>0&&<div className="frow sub"><span className="flbl2">Flete prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.fleteP,2)}</span></div>}
+          {pCalc.thcdP>0&&<div className="frow sub"><span className="flbl2">THCD prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.thcdP,2)}</span></div>}
+          {pCalc.seguroP>0&&<div className="frow sub"><span className="flbl2">Seguro prop.</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.seguroP,2)}</span></div>}
           {(c.gastos||[]).filter(g=>g.enReal).map(g=>{
             const v=toUSD(g.monto,g.moneda,rates)*pCalc.prop;
-            return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto"} (prop.)</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(v,4)}</span></div>);
+            return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto"} (prop.)</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(v,2)}</span></div>);
           })}
           {(p.gastosEsp||[]).map(g=>{
             const v=toUSD(g.monto,g.moneda,rates);
-            return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto espec."}</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(v,4)}</span></div>);
+            return(<div key={g.id} className="frow sub"><span className="flbl2">{g.concepto||"Gasto espec."}</span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(v,2)}</span></div>);
           })}
           <div className="frow ftot"><span style={{color:"var(--ac)"}}>Costo Total Real</span>
             <span><span className="fval-main" style={{color:"var(--usd)"}}>$ {fmt(pCalc.costoRealTotalUSD,2)}</span><span className="fval-sec">{fmt(pCalc.costoRealTotalUSD*rates.mercado,0)} CUP</span></span>
           </div>
           <div className="frow sub"><span className="flbl2">Costo unitario real</span>
-            <span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.costoRealUnitUSD,4)}</span><span className="fval-sec">{fmt(pCalc.costoRealUnitUSD*rates.mercado,2)} CUP</span></span>
+            <span><span className="fval-main" style={{color:"var(--usd)",fontSize:13}}>$ {fmt(pCalc.costoRealUnitUSD,2)}</span><span className="fval-sec">{fmt(pCalc.costoRealUnitUSD*rates.mercado,2)} CUP</span></span>
           </div>
           {totImpUSD>0&&(<>
             <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
             <div className="frow fimp"><span className="flbl2">− Impuestos ONAT / unidad</span>
-              <span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>$ {fmt(totImpUSD,4)}</span><span className="fval-sec">{fmt(imp.totalImpCUP,2)} CUP</span></span>
+              <span><span className="fval-main" style={{color:"var(--ac4)",fontSize:13}}>$ {fmt(totImpUSD,2)}</span><span className="fval-sec">{fmt(imp.totalImpCUP,2)} CUP</span></span>
             </div>
             <div className="frow sub"><span className="flbl2">Costo unitario + impuestos</span>
-              <span className="fval-main" style={{color:"var(--ac3)",fontSize:13}}>$ {fmt(pCalc.costoRealUnitUSD+totImpUSD,4)}</span>
+              <span className="fval-main" style={{color:"var(--ac3)",fontSize:13}}>$ {fmt(pCalc.costoRealUnitUSD+totImpUSD,2)}</span>
             </div>
           </>)}
           {pvRealUSD>0&&(<>
             <div style={{height:1,background:"var(--bd)",margin:"10px 0"}}/>
             <div className="frow sub"><span className="flbl2">PV Real / unidad</span>
-              <span><span className="fval-main" style={{color:"var(--ac2)",fontSize:13}}>$ {fmt(pvRealUSD,4)}</span><span className="fval-sec">{fmt(pvRealUSD*rates.mercado,2)} CUP</span></span>
+              <span><span className="fval-main" style={{color:"var(--ac2)",fontSize:13}}>$ {fmt(pvRealUSD,2)}</span><span className="fval-sec">{fmt(pvRealUSD*rates.mercado,2)} CUP</span></span>
             </div>
             {(()=>{
               const mb=pvRealUSD-pCalc.costoRealUnitUSD;
               const mn=mb-totImpUSD;
               return(<>
-                {totImpUSD>0&&<div className="frow sub"><span className="flbl2">Margen bruto / unidad</span><span className="fval-main" style={{color:mb>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{mb>=0?"+":""}$ {fmt(mb,4)}</span></div>}
+                {totImpUSD>0&&<div className="frow sub"><span className="flbl2">Margen bruto / unidad</span><span className="fval-main" style={{color:mb>=0?"var(--ac2)":"var(--ac4)",fontSize:13}}>{mb>=0?"+":""}$ {fmt(mb,2)}</span></div>}
                 <div className="frow ftot" style={{borderTopColor:"var(--ac2)"}}><span style={{color:"var(--ac2)"}}>Ganancia neta / unidad</span>
-                  <span><span className="fval-main" style={{color:mn>=0?"var(--ac2)":"var(--ac4)"}}>{mn>=0?"+":""}$ {fmt(mn,4)}</span><span className="fval-sec">{fmt(mn*rates.mercado,2)} CUP</span></span>
+                  <span><span className="fval-main" style={{color:mn>=0?"var(--ac2)":"var(--ac4)"}}>{mn>=0?"+":""}$ {fmt(mn,2)}</span><span className="fval-sec">{fmt(mn*rates.mercado,2)} CUP</span></span>
                 </div>
               </>);
             })()}
