@@ -570,6 +570,43 @@ function ContenedorModal({inicial,rates,onSave,onClose}){
               <button className="btn bs bsm" onClick={()=>addGP(p.id)}>+ Gasto específico</button>
             </div>
 
+            {(()=>{
+              const _lote=calcLote(c,rates);
+              const _pCalc=calcProducto(p,c,rates,_lote);
+              const _cb=_pCalc.cantBase;
+              const _unidad=(p.niveles||[])[0]?.nombre||"unidad";
+              return _cb>0?(
+                <div style={{background:"var(--sf3)",border:"1px solid var(--bd2)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"var(--ac2)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Costo calculado — úsalo para definir tus precios</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <div>
+                      <div style={{fontSize:10,color:"var(--tx3)",marginBottom:2}}>Costo Real / {_unidad}</div>
+                      <div style={{fontFamily:"monospace",fontSize:15,fontWeight:700,color:"var(--usd)"}}>$ {fmt(_pCalc.costoRealUnitUSD,2)}</div>
+                      <div style={{fontSize:10,color:"var(--tx3)"}}>{fmt(_pCalc.costoRealUnitUSD*rates.mercado,2)} CUP mercado</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,color:"var(--tx3)",marginBottom:2}}>Costo ONAT / {_unidad}</div>
+                      <div style={{fontFamily:"monospace",fontSize:15,fontWeight:700,color:"var(--cup)"}}>{fmt(_pCalc.costoOnatUnitCUP,2)} CUP</div>
+                      <div style={{fontSize:10,color:"var(--tx3)"}}>≈ $ {fmt(_pCalc.costoOnatUnitUSD,2)} USD</div>
+                    </div>
+                  </div>
+                  {(p.niveles||[]).length>1&&(
+                    <div style={{marginTop:8,borderTop:"1px solid var(--bd)",paddingTop:8}}>
+                      <div style={{fontSize:10,color:"var(--tx3)",marginBottom:4}}>Por nivel de empaque:</div>
+                      {(p.niveles||[]).slice(1).map((n,ni)=>{
+                        const _ub=(()=>{let u=1;for(let j=1;j<=ni+1;j++)u*=num((p.niveles||[])[j]?.porNivelAnterior||0);return u;})();
+                        return _ub>0?(
+                          <div key={n.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"2px 0"}}>
+                            <span style={{color:"var(--tx2)"}}>{n.nombre||"Nivel "+(ni+2)}</span>
+                            <span style={{fontFamily:"monospace",color:"var(--usd)"}}>$ {fmt(_pCalc.costoRealUnitUSD*_ub,2)} / {fmt(_pCalc.costoOnatUnitCUP*_ub,2)} CUP</span>
+                          </div>
+                        ):null;
+                      })}
+                    </div>
+                  )}
+                </div>
+              ):null;
+            })()}
             <div style={{fontSize:11,fontWeight:700,color:"var(--ac)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:8}}>Precios de Venta (por unidad base: {(p.niveles||[])[0]?.nombre||"unidad"})</div>
             <div className="fg g2">
               <div className="fgrp"><label className="flbl">🧾 PV ONAT <span style={{color:"var(--tx3)",fontWeight:400,textTransform:"none",letterSpacing:0}}>(para cálculo de impuestos)</span></label>
@@ -632,31 +669,44 @@ function FichasProducto({p,c,rates,lote}){
         {totImpUSD>0&&<span className="tag" style={{background:"rgba(247,111,79,.1)",borderColor:"rgba(247,111,79,.3)",color:"var(--ac4)"}}>
           Imp. lote: $ {fmt(totImpUSD*pCalc.cantBase,2)} / {fmt(imp.totalImpCUP*pCalc.cantBase,2)} CUP
         </span>}
+        <button className="btn bs bsm" style={{marginLeft:"auto"}} onClick={()=>exportExcelProducto(p,c,rates)}>⬇ Excel producto</button>
       </div>
 
       {nivelesReal.length>0&&(
         <div style={{marginBottom:16}}>
-          <div style={{fontSize:11,fontWeight:700,color:"var(--tx2)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:8}}>Costo por nivel de empaque</div>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--tx2)",textTransform:"uppercase",letterSpacing:"1px",marginBottom:8}}>Costos y Precios de Venta por Nivel de Empaque</div>
           <div className="tw">
             <table className="niv-table">
               <thead><tr>
-                <th>Nivel</th><th>= Unid. base</th><th>Cant. en lote</th>
-                <th style={{color:"var(--usd)"}}>Costo Real / u (USD)</th>
-                <th style={{color:"var(--tx3)"}}>CUP merc.</th>
-                <th style={{color:"var(--cup)"}}>Costo ONAT / u (CUP)</th>
-                <th style={{color:"var(--tx3)"}}>≈ USD</th>
+                <th>Nivel</th>
+                <th>= Unid. base</th>
+                <th>Cant. en lote</th>
+                <th style={{color:"var(--usd)"}}>Costo Real (USD)</th>
+                <th style={{color:"var(--cup)"}}>Costo ONAT (CUP)</th>
+                <th style={{color:"var(--ac2)"}}>PV Real (USD)</th>
+                <th style={{color:"var(--ac2)",fontSize:10}}>CUP merc.</th>
+                <th style={{color:"var(--cup)"}}>PV ONAT (CUP)</th>
               </tr></thead>
               <tbody>{nivelesReal.map((n,ni)=>{
                 const no=nivelesOnat[ni];
                 const cantTot=ni===0?pCalc.cantBase:Math.round(pCalc.cantBase/(n.unidadesBase||1));
+                const pvRealNivel=pvRealUSD>0?pvRealUSD*n.unidadesBase:null;
+                const pvOnatNivel=pvOnatCUP>0?pvOnatCUP*n.unidadesBase:null;
                 return(<tr key={n.id} className={ni===0?"niv-tot":""}>
                   <td><b>{n.nombre||"Nivel "+(ni+1)}</b>{ni===0&&<span className="tag" style={{marginLeft:6,fontSize:9}}>BASE</span>}</td>
                   <td className="tm">{ni===0?"1":fmt(n.unidadesBase,0)}</td>
                   <td className="tm">{fmt(cantTot,0)} {n.unidad}</td>
                   <td className="tusd">$ {fmt(n.costo,2)}</td>
-                  <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{fmt(n.costo*rates.mercado,2)}</td>
                   <td className="tcup">{no?fmt(no.costo,2):"-"} CUP</td>
-                  <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>{no?"≈ $"+fmt(no.costo/rates.mercado,2):"-"}</td>
+                  <td className="tm" style={{color:"var(--ac2)",fontWeight:ni===0?700:400}}>
+                    {pvRealNivel!=null?"$ "+fmt(pvRealNivel,2):<span style={{color:"var(--tx3)"}}>—</span>}
+                  </td>
+                  <td className="tm" style={{color:"var(--tx3)",fontSize:11}}>
+                    {pvRealNivel!=null?fmt(pvRealNivel*rates.mercado,2):"—"}
+                  </td>
+                  <td className="tcup" style={{fontWeight:ni===0?700:400}}>
+                    {pvOnatNivel!=null?fmt(pvOnatNivel,2)+" CUP":<span style={{color:"var(--tx3)"}}>—</span>}
+                  </td>
                 </tr>);
               })}</tbody>
             </table>
@@ -793,6 +843,282 @@ function FichasProducto({p,c,rates,lote}){
       </div>
     </div>
   );
+}
+
+
+// ── EXCEL HELPERS ──
+function buildExcelStyles(wb){
+  const BG="0F1117",SF="1E2333",SF2="252B3D",AC="4F8EF7",AC2="38D9A9",AC3="F7C948",
+    PUR="A78BFA",TX="E8ECF4",TX2="9AA3BC",BRD="2A3050",RED="F76F4F",GRN="38D9A9";
+  const sH=(c,bg,fg,sz=10,align="center")=>{
+    c.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF"+bg}};
+    c.font={bold:true,color:{argb:"FF"+fg},size:sz,name:"Calibri"};
+    c.alignment={horizontal:align,vertical:"middle",wrapText:true};
+  };
+  const sD=(c,bg,fg,bold=false,align="left")=>{
+    c.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF"+bg}};
+    c.font={bold,color:{argb:"FF"+fg},size:10,name:"Calibri"};
+    c.alignment={horizontal:align,vertical:"middle"};
+  };
+  const br=(c)=>{c.border={top:{style:"thin",color:{argb:"FF"+BRD}},left:{style:"thin",color:{argb:"FF"+BRD}},bottom:{style:"thin",color:{argb:"FF"+BRD}},right:{style:"thin",color:{argb:"FF"+BRD}}};};
+  return {BG,SF,SF2,AC,AC2,AC3,PUR,TX,TX2,BRD,RED,GRN,sH,sD,br};
+}
+
+function addProductoSheet(wb,p,c,rates,lote,styles){
+  const {BG,SF,SF2,AC,AC2,AC3,PUR,TX,TX2,BRD,RED,GRN,sH,sD,br}=styles;
+  const pCalc=calcProducto(p,c,rates,lote);
+  const nivelesReal=calcNiveles(p.niveles||[],pCalc.costoRealUnitUSD);
+  const nivelesOnat=calcNiveles(p.niveles||[],pCalc.costoOnatUnitCUP);
+  const pvOnatCUP=toCUPonat(p.pvOnat||0,p.monedaPvOnat,rates);
+  const pvRealUSD=toUSD(p.pvReal||0,p.monedaPvReal,rates);
+  const imp=calcImpuestos(pvOnatCUP,pCalc.costoOnatUnitCUP);
+  const totImpUSD=imp.totalImpCUP/rates.mercado;
+  const rentUnit=pvRealUSD>0?calcRentabilidad(pCalc.costoRealUnitUSD,pvRealUSD,totImpUSD):null;
+  const rentLote=pvRealUSD>0?calcRentabilidad(pCalc.costoRealTotalUSD,pvRealUSD*pCalc.cantBase,totImpUSD*pCalc.cantBase):null;
+  const unidad=(p.niveles||[])[0]?.nombre||"u";
+
+  const sheetName=(p.nombre||"Producto").slice(0,28);
+  const ws=wb.addWorksheet(sheetName);
+  ws.views=[{showGridLines:false}];
+  [32,18,18,18,18,18,14].forEach((w,i)=>ws.getColumn(i+1).width=w);
+
+  let row=1;
+  const title=(text,bg,fg,sz=11)=>{
+    ws.mergeCells(`A${row}:G${row}`);ws.getRow(row).height=sz>10?30:22;
+    const c2=ws.getCell(`A${row}`);c2.value=text;sH(c2,bg,fg,sz);row++;
+  };
+  const sep=()=>{ws.getRow(row).height=6;for(let i=1;i<=7;i++)ws.getCell(row,i).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF"+BG}};row++;};
+  const dataRow=(label,vals,isTot=false,bg=null)=>{
+    ws.getRow(row).height=isTot?20:15;
+    const rowBg=bg||(isTot?SF2:BG);
+    vals.forEach((v,i)=>{
+      const cell=ws.getCell(row,i+1);
+      sD(cell,rowBg,isTot?TX:TX2,isTot,i===0?"left":"right");
+      cell.value=v===""||v===null||v===undefined?"":v;br(cell);
+    });
+    row++;
+  };
+
+  // HEADER
+  title(`📦 ${p.nombre.toUpperCase()} — FICHA DE COSTO`,BG,AC,13);
+  title(`Lote: ${c.nombre}  |  Código: ${p.codigo||"-"}  |  Fecha: ${c.fecha}  |  Proporción del lote: ${fmt(pCalc.prop*100,2)}%`,SF,TX2,9);
+  sep();
+
+  // NIVELES + PRECIOS
+  title("▌ COSTOS Y PRECIOS POR NIVEL DE EMPAQUE",SF2,AC2,10);
+  ws.getRow(row).height=16;
+  ["Nivel","= Unid. base","Cant. en lote","Costo Real (USD)","Costo ONAT (CUP)","PV Real (USD)","PV ONAT (CUP)"].forEach((h,i)=>{
+    const cell=ws.getCell(row,i+1);sH(cell,AC2+"22",AC2,9);cell.value=h;br(cell);
+    if(i>0)cell.alignment={...cell.alignment,horizontal:"right"};
+  });row++;
+  nivelesReal.forEach((n,ni)=>{
+    const no=nivelesOnat[ni];
+    const cantTot=ni===0?pCalc.cantBase:Math.round(pCalc.cantBase/(n.unidadesBase||1));
+    const pvRN=pvRealUSD>0?pvRealUSD*n.unidadesBase:"-";
+    const pvON=pvOnatCUP>0?pvOnatCUP*n.unidadesBase:"-";
+    const bg=ni===0?SF2:ni%2===0?BG:SF;
+    [n.nombre||"Nivel "+(ni+1),ni===0?"1":n.unidadesBase,`${fmt(cantTot,0)} ${n.unidad}`,
+     pvRN!=="-"?`$ ${fmt(n.costo,2)}`:fmt(n.costo,2),
+     no?`${fmt(no.costo,2)} CUP`:"-",
+     pvRN!=="-"?`$ ${fmt(pvRN,2)}`:"-",
+     pvON!=="-"?`${fmt(pvON,2)} CUP`:"-"
+    ].forEach((v,i)=>{
+      const cell=ws.getCell(row,i+1);sD(cell,bg,ni===0?TX:TX2,ni===0,i===0?"left":"right");cell.value=v;br(cell);
+    });row++;
+  });
+  sep();
+
+  // FICHA ONAT
+  title("▌ FICHA ONAT",SF2,PUR,10);
+  dataRow("CIF proporcional (base)",[`${fmt(pCalc.cifOnatCUP,2)} CUP`,"","","","","",""],false);
+  (c.gastos||[]).filter(g=>g.enOnat).forEach(g=>{
+    const v=toUSD(g.monto,g.moneda,rates)*rates.onat*pCalc.prop;
+    dataRow(g.concepto||"Gasto ONAT",[`${fmt(v,2)} CUP`,"","","","","",""],false);
+  });
+  dataRow("Costo Total ONAT",[`${fmt(pCalc.costoOnatTotalCUP,2)} CUP`,`≈ $ ${fmt(pCalc.costoOnatTotalUSD,2)}`,"","","","",""],true);
+  dataRow("Costo unitario ONAT",[`${fmt(pCalc.costoOnatUnitCUP,2)} CUP / ${unidad}`,`≈ $ ${fmt(pCalc.costoOnatUnitUSD,2)}`,"","","","",""],false);
+  if(pvOnatCUP>0){
+    dataRow("PV ONAT / "+unidad,[`${fmt(pvOnatCUP,2)} CUP`,"","","","","",""],false);
+    dataRow("Utilidad ONAT / "+unidad,[`${fmt(imp.utilOnat,2)} CUP`,"","","","","",""],false);
+    dataRow("11% sobre ventas",[`${fmt(imp.imp11,2)} CUP`,"","","","","",""],false);
+    dataRow("Utilidad después del 11%",[`${fmt(imp.utilNeta,2)} CUP`,"","","","","",""],false);
+    dataRow("35% sobre utilidad neta",[`${fmt(imp.imp35,2)} CUP`,"","","","","",""],false);
+    dataRow("TOTAL IMPUESTOS / "+unidad,[`${fmt(imp.totalImpCUP,2)} CUP`,`≈ $ ${fmt(totImpUSD,2)}`,"","","","",""],true,SF2);
+    const totVta=pvOnatCUP*pCalc.cantBase;const totCosto=pCalc.costoOnatTotalCUP;
+    const totUtil=totVta-totCosto;const tot11=totVta*0.11;
+    const totUN=totUtil-tot11;const tot35=totUN>0?totUN*0.35:0;const totImpL=tot11+tot35;
+    dataRow(`TOTAL IMPUESTOS LOTE (${fmt(pCalc.cantBase,0)} ${unidad})`,[`${fmt(totImpL,2)} CUP`,`≈ $ ${fmt(totImpL/rates.mercado,2)}`,"","","","",""],true,SF2);
+  }
+  sep();
+
+  // FICHA REAL
+  title("▌ FICHA REAL",SF2,AC,10);
+  dataRow("Valor mercancía",[`$ ${fmt(pCalc.precioMercUSD,2)}`,"","","","","",""],false);
+  if(pCalc.fleteP>0)dataRow("Flete proporcional",[`$ ${fmt(pCalc.fleteP,2)}`,"","","","","",""],false);
+  if(pCalc.thcdP>0)dataRow("THCD proporcional",[`$ ${fmt(pCalc.thcdP,2)}`,"","","","","",""],false);
+  if(pCalc.seguroP>0)dataRow("Seguro proporcional",[`$ ${fmt(pCalc.seguroP,2)}`,"","","","","",""],false);
+  (c.gastos||[]).filter(g=>g.enReal).forEach(g=>{
+    const v=toUSD(g.monto,g.moneda,rates)*pCalc.prop;
+    dataRow(`${g.concepto||"Gasto"} (prop.)`,[`$ ${fmt(v,2)}`,"","","","","",""],false);
+  });
+  (p.gastosEsp||[]).forEach(g=>{
+    dataRow(g.concepto||"Gasto específico",[`$ ${fmt(toUSD(g.monto,g.moneda,rates),2)}`,"","","","","",""],false);
+  });
+  dataRow("Costo Total Real",[`$ ${fmt(pCalc.costoRealTotalUSD,2)}`,`${fmt(pCalc.costoRealTotalUSD*rates.mercado,2)} CUP`,"","","","",""],true);
+  dataRow("Costo unitario real",[`$ ${fmt(pCalc.costoRealUnitUSD,2)} / ${unidad}`,`${fmt(pCalc.costoRealUnitUSD*rates.mercado,2)} CUP`,"","","","",""],false);
+  if(totImpUSD>0)dataRow("− Impuestos ONAT / "+unidad,[`$ ${fmt(totImpUSD,2)}`,`${fmt(imp.totalImpCUP,2)} CUP`,"","","","",""],false);
+  if(pvRealUSD>0){
+    dataRow("PV Real / "+unidad,[`$ ${fmt(pvRealUSD,2)}`,`${fmt(pvRealUSD*rates.mercado,2)} CUP`,"","","","",""],false);
+    const mb=pvRealUSD-pCalc.costoRealUnitUSD;const mn=mb-totImpUSD;
+    if(totImpUSD>0)dataRow("Margen bruto / "+unidad,[`$ ${fmt(mb,2)}`,"","","","","",""],false);
+    dataRow("GANANCIA NETA / "+unidad,[`$ ${fmt(mn,2)}`,`${fmt(mn*rates.mercado,2)} CUP`,"","","","",""],true,SF2);
+    const totVR=pvRealUSD*pCalc.cantBase;const totCR=pCalc.costoRealTotalUSD;
+    const totIU=totImpUSD*pCalc.cantBase;const totMN=totVR-totCR-totIU;
+    dataRow(`GANANCIA NETA LOTE (${fmt(pCalc.cantBase,0)} ${unidad})`,[`$ ${fmt(totMN,2)}`,`${fmt(totMN*rates.mercado,2)} CUP`,"","","","",""],true,SF2);
+  }
+
+  // RENTABILIDAD
+  if(rentUnit||rentLote){
+    sep();
+    title("▌ INDICADORES DE RENTABILIDAD",SF2,AC3,10);
+    ws.getRow(row).height=16;
+    ["Indicador","Por unidad base","Total lote","Fórmula","","",""].forEach((h,i)=>{
+      const cell=ws.getCell(row,i+1);sH(cell,AC3+"22",AC3,9);cell.value=h;br(cell);
+    });row++;
+    [
+      ["Markup bruto",rentUnit?fmt(rentUnit.markupBruto,2)+"%":"-",rentLote?fmt(rentLote.markupBruto,2)+"%":"-","Utilidad bruta / Costo × 100"],
+      ["Markup neto",rentUnit?fmt(rentUnit.markupNeto,2)+"%":"-",rentLote?fmt(rentLote.markupNeto,2)+"%":"-","Utilidad neta / Costo × 100 (después de imp.)"],
+      ["Margen bruto",rentUnit?fmt(rentUnit.margenBrutoPct,2)+"%":"-",rentLote?fmt(rentLote.margenBrutoPct,2)+"%":"-","Utilidad bruta / Ventas × 100"],
+      ["Margen neto",rentUnit?fmt(rentUnit.margenNetoPct,2)+"%":"-",rentLote?fmt(rentLote.margenNetoPct,2)+"%":"-","Utilidad neta / Ventas × 100 (después de imp.)"],
+    ].forEach(([label,unit,loteV,formula],ri)=>{
+      const bg=ri%2===0?BG:SF;
+      [label,unit,loteV,formula,"","",""].forEach((v,i)=>{
+        const cell=ws.getCell(row,i+1);sD(cell,bg,TX,false,i===0?"left":"right");cell.value=v;br(cell);
+      });row++;
+    });
+    dataRow("Base de costo utilizada",["Costo puesto en almacén (CIF + gastos operativos)","","","","",""],false,SF2);
+  }
+
+  sep();
+  ws.mergeCells(`A${row}:G${row}`);
+  const fc=ws.getCell(`A${row}`);
+  fc.value=`Generado: ${new Date().toLocaleString("es-ES")}  |  Mercado: ${rates.mercado} CUP/USD  |  ONAT: ${rates.onat} CUP/USD`;
+  sD(fc,BG,TX2);fc.alignment={horizontal:"center"};
+}
+
+async function exportExcelProducto(p,c,rates){
+  const wb=new ExcelJS.Workbook();wb.creator="Almacén Mayorista";wb.created=new Date();
+  const styles=buildExcelStyles(wb);
+  const lote=calcLote(c,rates);
+  addProductoSheet(wb,p,c,rates,lote,styles);
+  const buf=await wb.xlsx.writeBuffer();
+  const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;
+  a.download=`FichaCosto_${p.codigo||p.nombre||"producto"}_${c.fecha}.xlsx`;
+  a.click();URL.revokeObjectURL(url);
+}
+
+async function exportExcelLote(c,rates){
+  const wb=new ExcelJS.Workbook();wb.creator="Almacén Mayorista";wb.created=new Date();
+  const styles=buildExcelStyles(wb);
+  const {BG,SF,SF2,AC,AC2,AC3,PUR,TX,TX2,BRD,sH,sD,br}=styles;
+  const lote=calcLote(c,rates);
+
+  // ── HOJA 1: RESUMEN DEL LOTE ──
+  const ws=wb.addWorksheet("Resumen Lote");
+  ws.views=[{showGridLines:false}];
+  [32,18,18,18,16,16,14].forEach((w,i)=>ws.getColumn(i+1).width=w);
+  let row=1;
+  const title=(text,bg,fg,sz=11)=>{
+    ws.mergeCells(`A${row}:G${row}`);ws.getRow(row).height=sz>10?30:22;
+    const cell=ws.getCell(`A${row}`);cell.value=text;sH(cell,bg,fg,sz);row++;
+  };
+  const sep=()=>{ws.getRow(row).height=6;for(let i=1;i<=7;i++)ws.getCell(row,i).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF"+BG}};row++;};
+  const dRow=(label,vals,isTot=false,bg2=null)=>{
+    ws.getRow(row).height=isTot?20:15;const rowBg=bg2||(isTot?SF2:BG);
+    vals.forEach((v,i)=>{const cell=ws.getCell(row,i+1);sD(cell,rowBg,isTot?TX:TX2,isTot,i===0?"left":"right");cell.value=v===""||v===null?"":v;br(cell);});row++;
+  };
+
+  title(`📦 RESUMEN DEL LOTE — ${c.nombre.toUpperCase()}`,BG,AC,13);
+  title(`Término: ${c.termino}  |  Proveedor: ${c.proveedor||"-"}  |  País: ${c.pais||"-"}  |  Fecha: ${c.fecha}  |  Código: ${c.codigo||"-"}`,SF,TX2,9);
+  sep();
+  title("▌ DESGLOSE FINANCIERO DEL LOTE",SF2,AC,10);
+  ws.getRow(row).height=16;
+  ["Concepto","USD","CUP Mercado","CUP ONAT","","",""].forEach((h,i)=>{
+    const cell=ws.getCell(row,i+1);sH(cell,AC+"22",AC,9);cell.value=h;br(cell);
+    if(i>0)cell.alignment={...cell.alignment,horizontal:"right"};
+  });row++;
+  [
+    ["Valor mercancía",lote.valorMercUSD],
+    ["Flete",lote.fleteUSD],
+    ["THCD",lote.thcdUSD],
+    ["Seguro",lote.seguroUSD],
+    ["Gastos del lote (reales)",lote.gastosLoteRealUSD],
+    ["COSTO TOTAL DEL LOTE",lote.costoTotalUSD],
+  ].forEach(([label,v],fi)=>{
+    if(v===0&&fi>0&&fi<5)return;
+    const isTot=fi===5;ws.getRow(row).height=isTot?20:15;
+    [`${label}`,`$ ${fmt(v,2)}`,`${fmt(v*rates.mercado,2)} CUP`,`${fmt(v*rates.onat,2)} CUP`,"","",""].forEach((val,i)=>{
+      const cell=ws.getCell(row,i+1);sD(cell,isTot?SF2:BG,isTot?TX:TX2,isTot,i===0?"left":"right");cell.value=val;br(cell);
+    });row++;
+  });
+  sep();
+
+  // GASTOS DEL LOTE DETALLADOS
+  if((c.gastos||[]).length>0){
+    title("▌ GASTOS DEL LOTE",SF2,AC3,10);
+    ws.getRow(row).height=16;
+    ["Concepto","Monto","Moneda","≈ USD","ONAT","Real",""].forEach((h,i)=>{
+      const cell=ws.getCell(row,i+1);sH(cell,AC3+"22",AC3,9);cell.value=h;br(cell);
+    });row++;
+    (c.gastos||[]).forEach((g,gi)=>{
+      const usdv=toUSD(g.monto,g.moneda,rates);
+      const bg=gi%2===0?BG:SF;
+      [g.concepto,num(g.monto),g.moneda,`$ ${fmt(usdv,2)}`,g.enOnat?"✓":"—",g.enReal?"✓":"—",""].forEach((v,i)=>{
+        const cell=ws.getCell(row,i+1);sD(cell,bg,TX,false,i===0?"left":"center");cell.value=v;br(cell);
+      });row++;
+    });
+    sep();
+  }
+
+  // RESUMEN POR PRODUCTO
+  title("▌ RESUMEN POR PRODUCTO",SF2,PUR,10);
+  ws.getRow(row).height=16;
+  ["Producto","Cantidad base","Prop. %","Costo Real/u","Costo ONAT/u","PV Real/u","PV ONAT/u"].forEach((h,i)=>{
+    const cell=ws.getCell(row,i+1);sH(cell,PUR+"22",PUR,9);cell.value=h;br(cell);
+    if(i>0)cell.alignment={...cell.alignment,horizontal:"right"};
+  });row++;
+  (c.productos||[]).forEach((p,pi)=>{
+    const pCalc=calcProducto(p,c,rates,lote);
+    const pvR=toUSD(p.pvReal||0,p.monedaPvReal,rates);
+    const pvO=toCUPonat(p.pvOnat||0,p.monedaPvOnat,rates);
+    const bg=pi%2===0?BG:SF;
+    [p.nombre,`${fmt(pCalc.cantBase,0)} ${(p.niveles||[])[0]?.nombre||"u"}`,
+     `${fmt(pCalc.prop*100,2)}%`,
+     `$ ${fmt(pCalc.costoRealUnitUSD,2)}`,
+     `${fmt(pCalc.costoOnatUnitCUP,2)} CUP`,
+     pvR>0?`$ ${fmt(pvR,2)}`:"-",
+     pvO>0?`${fmt(pvO,2)} CUP`:"-",
+    ].forEach((v,i)=>{
+      const cell=ws.getCell(row,i+1);sD(cell,bg,TX,false,i===0?"left":"right");cell.value=v;br(cell);
+    });row++;
+  });
+  sep();
+  ws.mergeCells(`A${row}:G${row}`);
+  const fc=ws.getCell(`A${row}`);
+  fc.value=`Generado: ${new Date().toLocaleString("es-ES")}  |  Mercado: ${rates.mercado} CUP/USD  |  ONAT: ${rates.onat} CUP/USD`;
+  sD(fc,BG,TX2);fc.alignment={horizontal:"center"};
+
+  // ── HOJAS POR PRODUCTO ──
+  (c.productos||[]).forEach(p=>addProductoSheet(wb,p,c,rates,lote,styles));
+
+  const buf=await wb.xlsx.writeBuffer();
+  const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;
+  a.download=`FichaCosto_Lote_${c.codigo||c.nombre||"lote"}_${c.fecha}.xlsx`;
+  a.click();URL.revokeObjectURL(url);
 }
 
 // ── APP ──
@@ -935,6 +1261,7 @@ function App(){
           </div>
           <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
             <button className="btn bs" onClick={()=>{setEditC(JSON.parse(JSON.stringify(c)));setShowMo(true);}}>✎ Editar</button>
+            <button className="btn bsu" onClick={()=>exportExcelLote(c,rates)}>⬇ Excel Lote completo</button>
             <button className="btn bd2" onClick={()=>delCont(c.id)}>🗑 Eliminar</button>
           </div>
           <div className="srow">
