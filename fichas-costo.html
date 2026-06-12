@@ -664,7 +664,7 @@ function FichasProducto({p,c,rates,lote}){
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
         <span style={{fontWeight:700,fontSize:16}}>{p.nombre}</span>
         {p.codigo&&<span className="tag">{p.codigo}</span>}
-        <span className="tag">Prop. {fmt(pCalc.prop*100,1)}% del lote</span>
+        <span className="tag">Prop. {fmt(pCalc.prop*100,2)}% del lote</span>
         <span className="tag">{fmt(pCalc.cantBase,0)} {(p.niveles||[])[0]?.nombre||"u"} totales</span>
         {totImpUSD>0&&<span className="tag" style={{background:"rgba(247,111,79,.1)",borderColor:"rgba(247,111,79,.3)",color:"var(--ac4)"}}>
           Imp. lote: $ {fmt(totImpUSD*pCalc.cantBase,2)} / {fmt(imp.totalImpCUP*pCalc.cantBase,2)} CUP
